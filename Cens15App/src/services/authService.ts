@@ -7,6 +7,7 @@ interface LoginResponse {
   name: string;
   role: string;
   userId: string;
+  mustChangePassword?: boolean;
 }
 
 export const login = async (email: string, password: string) => {
@@ -43,4 +44,39 @@ export const login = async (email: string, password: string) => {
     }
     throw error;
   }
+};
+
+export const requestInitialAccess = async (email: string) => {
+  return apiFetch('auth/request-initial-access', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  });
+};
+
+export const changePassword = async (currentPassword: string, newPassword: string) => {
+  return apiFetch('auth/change-password', {
+    method: 'POST',
+    body: JSON.stringify({ currentPassword, newPassword }),
+  });
+};
+
+export const requestPasswordReset = async (email: string) => {
+  return apiFetch('auth/request-password-reset', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  });
+};
+
+export const validatePasswordResetCode = async (email: string, code: string) => {
+  return apiFetch('auth/validate-password-reset-code', {
+    method: 'POST',
+    body: JSON.stringify({ email, code }),
+  });
+};
+
+export const resetPasswordWithCode = async (email: string, code: string, newPassword: string) => {
+  return apiFetch('auth/reset-password', {
+    method: 'POST',
+    body: JSON.stringify({ email, code, newPassword }),
+  });
 };

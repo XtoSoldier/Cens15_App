@@ -1,26 +1,35 @@
 import React, { useState } from 'react';
 import { View, StyleSheet, Image, Alert } from 'react-native';
-import { Text, TextInput, Button, Surface, TextInputProps } from 'react-native-paper';
+import { Text, TextInput, Button, Surface } from 'react-native-paper';
 import { KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import { requestInitialAccess } from '../services/authService';
 
 const RegisterScreen: React.FC = () => {
-  const [dni, setDni] = useState('');
+  const [email, setEmail] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleRegister = () => {
-    if (!dni) {
-      Alert.alert('Error', 'Por favor ingresá tu DNI');
+  const handleRegister = async () => {
+    const normalizedEmail = email.trim();
+    if (!normalizedEmail) {
+      Alert.alert('Error', 'Por favor ingresá tu correo electrónico');
       return;
     }
-    if (dni.length < 7 || dni.length > 8) {
-      Alert.alert('Error', 'DNI inválido');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      Alert.alert('Error', 'Correo electrónico inválido');
       return;
     }
     setIsLoading(true);
-    setTimeout(() => {
-      Alert.alert('Registro exitoso', `DNI ${dni} registrado correctamente`);
+    try {
+      await requestInitialAccess(normalizedEmail);
+      Alert.alert(
+        'Revisá tu correo',
+        'Si el correo está registrado, se envió un email con la clave para ingresar por primera vez.'
+      );
+    } catch (error: any) {
+      Alert.alert('Error', error?.message || 'No se pudo solicitar el acceso inicial');
+    } finally {
       setIsLoading(false);
-    }, 1500);
+    }
   };
 
   return (
@@ -44,12 +53,12 @@ const RegisterScreen: React.FC = () => {
             Registrarse
           </Text>
           <TextInput
-            label="DNI"
-            value={dni}
-            onChangeText={setDni}
+            label="Correo electrónico"
+            value={email}
+            onChangeText={setEmail}
             mode="outlined"
-            keyboardType="numeric"
-            maxLength={8}
+            keyboardType="email-address"
+            autoCapitalize="none"
             style={styles.input}
             outlineColor="#E0E0E0"
             activeOutlineColor="#1F5FAF"

@@ -7,6 +7,7 @@ import type { RootStackParamList } from '../navigation/AppNavigator';
 import { useAppDispatch, useAppSelector } from '../hooks/useRedux';
 import { setUserToken, incrementLoginAttempt, checkLock, updateProfile } from '../slices/appSlice';
 import { login } from '../services/authService';
+import { registerLoginActivity } from '../services/loginActivityService';
 import { clearUserData } from '../utils/storage';
 
 
@@ -48,6 +49,12 @@ const LoginScreen: React.FC = () => {
 
   try {
     const response = await login(email, password);
+    await registerLoginActivity({
+      email,
+      userId: response.userId,
+      success: true,
+      reason: response.mustChangePassword ? 'Login con cambio de contraseña pendiente' : 'Login exitoso',
+    });
 
     // 🔐 Guardar token en Redux
     dispatch(setUserToken(response.token));
@@ -62,19 +69,25 @@ const LoginScreen: React.FC = () => {
       })
     );
 
-    navigation.navigate('MainMenu');
+    if (response.mustChangePassword) {
+      navigation.navigate('ChangePassword', { currentPassword: password });
+    } else {
+      navigation.navigate('MainMenu');
+    }
   } catch (err: any) {
     dispatch(incrementLoginAttempt());
 
     const attemptsLeft = 3 - (loginAttempts + 1);
 
     if (err.message?.includes('Invalid Credentials')) {
+      await registerLoginActivity({ email, success: false, reason: 'Credenciales inválidas' });
       if (attemptsLeft <= 0) {
         setError('Demasiados intentos. Bloqueado por 3 minutos');
       } else {
         setError(`Credenciales inválidas. Te quedan ${attemptsLeft} intentos`);
       }
     } else {
+      await registerLoginActivity({ email, success: false, reason: err?.message || 'Error de conexión' });
       setError('Error de conexión con el servidor');
     }
   } finally {

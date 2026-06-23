@@ -4,11 +4,15 @@ import { Text, Surface, IconButton } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/AppNavigator';
+import { useAppSelector } from '../hooks/useRedux';
 
 type DocentesMenuNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Docentes'>;
 
 const DocentesScreen: React.FC = () => {
   const navigation = useNavigation<DocentesMenuNavigationProp>();
+  const { userRole } = useAppSelector((state) => state.app);
+  const normalizedRole = (userRole || '').toLowerCase();
+  const canCalificar = normalizedRole.includes('docente') || normalizedRole.includes('admin');
 
   const options = [
     {
@@ -22,8 +26,9 @@ const DocentesScreen: React.FC = () => {
       subtitle: 'Cargar notas por materia y curso',
       icon: 'pencil',
       route: 'DocenteCalificar' as const,
+      hidden: !canCalificar,
     },
-  ];
+  ].filter((option) => !option.hidden);
 
   return (
     <View style={styles.container}>
@@ -35,6 +40,11 @@ const DocentesScreen: React.FC = () => {
         </View>
 
         <View style={styles.optionsContainer}>
+          {!canCalificar && (
+            <Text style={styles.infoText}>
+              La carga de calificaciones está disponible solo para usuarios con rol docente.
+            </Text>
+          )}
           {options.map((opt) => (
             <TouchableOpacity
               key={opt.route}
@@ -112,6 +122,12 @@ const styles = StyleSheet.create({
   optionArrow: {
     margin: 0,
     padding: 0,
+  },
+  infoText: {
+    color: '#6B6B6B',
+    fontSize: 13,
+    textAlign: 'center',
+    marginBottom: 8,
   },
 });
 

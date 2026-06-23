@@ -4,7 +4,7 @@ import { Text, Surface, DataTable, Chip, IconButton, Avatar, Button } from 'reac
 import { useNavigation } from '@react-navigation/native';
 import { useAppSelector, useAppDispatch } from '../hooks/useRedux';
 import { updateProfile } from '../slices/appSlice';
-import { getDocenteByUserId, getAlumnosParaCalificar, DocenteMateriaConAlumnosDto, AlumnoCalificacionSimpleDto } from '../services/docenteService';
+import { getDocenteByUserId, getMisAlumnosParaCalificar, DocenteMateriaConAlumnosDto, AlumnoCalificacionSimpleDto } from '../services/docenteService';
 import { createCalificacion, updateCalificacion, SaveCalificacionRequest } from '../services/calificacionService';
 import { getUserIdFromToken } from '../utils/storage';
 
@@ -260,7 +260,7 @@ const DocenteCalificarScreen: React.FC = () => {
         return;
       }
       setDocenteNombre(`${docente.apellidos}, ${docente.nombres}`);
-      const data = await getAlumnosParaCalificar(docente.id);
+      const data = await getMisAlumnosParaCalificar();
       const mapped: MateriaCurso[] = data.map((m: DocenteMateriaConAlumnosDto) => ({
         materiaId: m.materiaId,
         materiaNombre: m.materiaNombre,

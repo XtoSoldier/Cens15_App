@@ -25,7 +25,15 @@ export const apiFetch = async (
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(text || 'Error en la petición');
+    try {
+      const json = text ? JSON.parse(text) : null;
+      throw new Error(json?.message || text || 'Error en la petición');
+    } catch (error: any) {
+      if (error?.message && error.message !== 'Unexpected end of JSON input') {
+        throw error;
+      }
+      throw new Error(text || 'Error en la petición');
+    }
   }
 
   const text = await response.text();

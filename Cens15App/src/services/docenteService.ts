@@ -7,6 +7,7 @@ export interface DocenteMateriaDto {
   curso: string;
   division: string;
   rol: string;
+  activo?: boolean;
 }
 
 export interface DocenteDto {
@@ -57,4 +58,8 @@ export const getDocenteByUserId = async (userId: string): Promise<DocenteDto | n
 
 export const getAlumnosParaCalificar = async (docenteId: number): Promise<DocenteMateriaConAlumnosDto[]> => {
   return await apiFetch(`Docentes/${docenteId}/alumnos-para-calificar`);
+};
+
+export const getMisAlumnosParaCalificar = async (): Promise<DocenteMateriaConAlumnosDto[]> => {
+  return await apiFetch('Docentes/mis-alumnos-para-calificar');
 };

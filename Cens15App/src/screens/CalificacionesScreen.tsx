@@ -171,6 +171,12 @@ const getAlumnoNombre = (alumno: any) => {
   return `${apellido} ${nombre}`.trim() || 'Alumno';
 };
 
+const getAlumnoNombreTitulo = (alumno: any) => {
+  const apellido = alumno?.apellido || alumno?.apellidos || alumno?.raw?.apellidos || '';
+  const nombre = alumno?.nombre || alumno?.nombres || alumno?.raw?.nombres || '';
+  return [apellido, nombre].filter(Boolean).join(', ') || 'Alumno';
+};
+
 const escapeHtml = (value: string | number | null | undefined) => String(value ?? '')
   .replace(/&/g, '&amp;')
   .replace(/</g, '&lt;')
@@ -275,6 +281,14 @@ const PAGE_FORMATS: Record<string, { widthMm: number; heightMm: number }> = {
 };
 
 const normalizeImageSrc = (src: string) => src;
+const normalizeDegreeSymbols = (value: string) => {
+  let normalized = value.replace(/º/g, '°');
+  while (normalized.includes('°°')) {
+    normalized = normalized.replace(/°°/g, '°');
+  }
+  return normalized.replace(/° °/g, '° ');
+};
+
 const readTemplateNumber = (template: any, camelKey: string, pascalKey: string, fallback: number) => {
   const value = template?.[camelKey] ?? template?.[pascalKey];
   const parsed = Number(value);
@@ -292,7 +306,7 @@ const buildHtmlFromTemplate = (rendered: RenderedCertificadoTemplate) => {
   const margenInferior = readTemplateNumber(rendered, 'margenInferior', 'MargenInferior', 20);
   const margenIzquierdo = readTemplateNumber(rendered, 'margenIzquierdo', 'MargenIzquierdo', 25);
   const margenDerecho = readTemplateNumber(rendered, 'margenDerecho', 'MargenDerecho', 25);
-  const html = readTemplateString(rendered, 'html', 'Html');
+  const html = normalizeDegreeSymbols(readTemplateString(rendered, 'html', 'Html'));
   const imagenesJson = readTemplateString(rendered, 'imagenesJson', 'ImagenesJson');
   const format = PAGE_FORMATS[formato] || PAGE_FORMATS.A4;
   const previewWidth = 800;
@@ -329,7 +343,7 @@ const buildHtmlFromTemplate = (rendered: RenderedCertificadoTemplate) => {
     return `<img src="${escapeHtml(normalizeImageSrc(img.src))}" style="position:absolute;left:${leftMm}mm;top:${topMm}mm;width:${widthMm}mm;height:${heightMm}mm;object-fit:contain;z-index:${img.zIndex || 1};" />`;
   }).join('');
 
-  return `
+  return normalizeDegreeSymbols(`
 <!doctype html>
 <html>
 <head>
@@ -346,6 +360,24 @@ const buildHtmlFromTemplate = (rendered: RenderedCertificadoTemplate) => {
       margin: 0 auto;
       background: #fff;
       overflow: hidden;
+    }
+    .watermark {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 140%;
+      transform: translate(-50%, -50%) rotate(54.74deg);
+      transform-origin: center;
+      z-index: 0;
+      color: rgba(31, 95, 175, 0.075);
+      font-family: "Courier New", monospace;
+      font-size: 22mm;
+      font-weight: 700;
+      letter-spacing: 1.5mm;
+      text-align: center;
+      white-space: nowrap;
+      pointer-events: none;
+      user-select: none;
     }
     .content {
       position: relative;
@@ -367,11 +399,12 @@ const buildHtmlFromTemplate = (rendered: RenderedCertificadoTemplate) => {
 </head>
 <body>
   <div class="page">
+    <div class="watermark">CENS N°15 Anexo Esc.41</div>
     ${imagesHtml}
     <div class="content">${html}</div>
   </div>
 </body>
-</html>`;
+</html>`);
 };
 
 const printHtmlOnWeb = (html: string) => {
@@ -772,6 +805,7 @@ const CalificacionesScreen: React.FC<Props> = ({ alumno }) => {
 
   return (
     <View style={styles.container}>
+      <Text style={styles.screenTitle}>Calificaciones para {getAlumnoNombreTitulo(alumno)}</Text>
       {loading && <ActivityIndicator animating color="#1F5FAF" style={styles.loader} />}
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
       <ScrollView style={styles.scrollContainer}>
@@ -860,6 +894,7 @@ const CalificacionesScreen: React.FC<Props> = ({ alumno }) => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F7F9FC' },
+  screenTitle: { fontSize: 18, fontWeight: '700', color: '#1F5FAF', marginHorizontal: 10, marginTop: 10, marginBottom: 6 },
   scrollContainer: { flex: 1, padding: 8 },
   loader: { marginVertical: 12 },
   errorText: { color: '#C62828', textAlign: 'center', marginVertical: 8 },

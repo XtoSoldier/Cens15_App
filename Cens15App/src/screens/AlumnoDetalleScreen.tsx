@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, ScrollView, Alert, TouchableOpacity, Image, Modal, Linking } from 'react-native';
-import { TextInput, Text, Divider, IconButton, Button, DataTable } from 'react-native-paper';
+import { TextInput, Text, Divider, IconButton, Button, DataTable, Snackbar } from 'react-native-paper';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import * as ImagePicker from 'expo-image-picker';
@@ -140,6 +140,12 @@ const formatCurso = (curso?: Curso) => {
   return [cd, curso.orientacionNombreCorto, curso.anexoNombre].filter(Boolean).join(' - ');
 };
 
+const getAlumnoNombreTitulo = (alumno: any) => {
+  const apellido = alumno?.apellido || alumno?.apellidos || alumno?.raw?.apellidos || '';
+  const nombre = alumno?.nombre || alumno?.nombres || alumno?.raw?.nombres || '';
+  return [apellido, nombre].filter(Boolean).join(', ') || 'Alumno';
+};
+
 const getCursoCompletoLabel = (inscripcion: any, cursos: Curso[], fallbackCurso = '', fallbackAnexo = '', fallbackOrientacion = '') => {
   const curso = resolveCursoFromInscripcion(inscripcion, cursos);
   const cursoNombre = curso?.curso || curso?.Curso || inscripcion?.cursoNombre || inscripcion?.CursoNombre || fallbackCurso;
@@ -199,6 +205,7 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
   const [deletingInscripcion, setDeletingInscripcion] = useState<any | null>(null);
   const [deletingLoading, setDeletingLoading] = useState(false);
   const [deleteError, setDeleteError] = useState('');
+  const [snackbarMessage, setSnackbarMessage] = useState('');
 
   useEffect(() => {
     const loadInscripciones = async () => {
@@ -258,6 +265,7 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
 
   const inscripcionActual = getInscripcionActiva(inscripciones);
   const cursoActual = getCursoCompletoLabel(inscripcionActual, cursos, formData.curso, formData.anexo, formData.orientacion) || getCursoText(inscripcionActual) || formData.curso;
+  const alumnoNombreTitulo = getAlumnoNombreTitulo(alumno);
 
   const tabs = [
     { key: 'datos', label: 'Datos', icon: 'account' },
@@ -329,12 +337,13 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
         cursoId: reinscribirCursoId,
         anio: reinscribirAnio,
       });
-      Alert.alert('Éxito', 'Alumno reinscripto correctamente');
       setReinscribirCursoId(null);
       setReinscribirAnio(currentYear);
       setReinscribirError('');
       const data = await getInscripcionesByAlumno(alumno.id);
       setInscripciones(data);
+      setActiveTab('historial');
+      setSnackbarMessage(`Alumno reinscripto correctamente${cursoLabel ? ` en ${cursoLabel}` : ''}.`);
     } catch (error: any) {
       setReinscribirError(error?.message || 'No se pudo reinscribir');
     } finally {
@@ -726,7 +735,7 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
 
         {activeTab === 'documentacion' && (
           <View>
-            <Text style={styles.sectionTitle}>Documentación</Text>
+            <Text style={styles.tabSectionTitle}>Documentación para {alumnoNombreTitulo}</Text>
             {loadingDocumentos && (
               <Text style={styles.helperText}>Cargando documentación...</Text>
             )}
@@ -823,7 +832,7 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
         )}
         {activeTab === 'historial' && (
           <View>
-            <Text style={styles.sectionTitle}>Historial de Inscripciones</Text>
+            <Text style={styles.tabSectionTitle}>Historial para {alumnoNombreTitulo}</Text>
             {loadingInscripciones && (
               <Text style={styles.helperText}>Cargando inscripciones...</Text>
             )}
@@ -992,9 +1001,24 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
           <CalificacionesScreen alumno={alumno} />
         )}
         {activeTab === 'constancias' && (
-          <ConstanciasTab alumno={alumno} />
+          <View>
+            <Text style={styles.tabSectionTitle}>Constancias para {alumnoNombreTitulo}</Text>
+            <ConstanciasTab alumno={alumno} />
+          </View>
         )}
       </ScrollView>
+
+      <Snackbar
+        visible={!!snackbarMessage}
+        onDismiss={() => setSnackbarMessage('')}
+        duration={3500}
+        action={{
+          label: 'OK',
+          onPress: () => setSnackbarMessage(''),
+        }}
+      >
+        {snackbarMessage}
+      </Snackbar>
 
       <Modal
         visible={!!deletingInscripcion}
@@ -1075,6 +1099,7 @@ const styles = StyleSheet.create({
   },
   divider: { marginVertical: 12 },
   sectionTitle: { fontSize: 16, fontWeight: '600', marginVertical: 8, color: '#1F5FAF' },
+  tabSectionTitle: { fontSize: 18, fontWeight: '700', marginBottom: 12, color: '#1F5FAF' },
   subtitle: { fontSize: 14, color: '#6B6B6B', marginVertical: 8 },
   docItem: { fontSize: 14, color: '#2B2B2B', marginBottom: 4 },
   docRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6 },

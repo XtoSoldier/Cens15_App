@@ -7,6 +7,8 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import HomeScreen from '../screens/HomeScreen';
 import LoginScreen from '../screens/LoginScreen';
 import RegisterScreen from '../screens/RegisterScreen';
+import ChangePasswordScreen from '../screens/ChangePasswordScreen';
+import ResetPasswordScreen from '../screens/ResetPasswordScreen';
 import ForgotPasswordScreen from '../screens/ForgotPasswordScreen';
 import MainMenu from '../screens/MainMenuScreen';
 import AlumnosScreen from '../screens/AlumnosScreen';
@@ -32,7 +34,9 @@ export type RootStackParamList = {
   Home: undefined;
   Login: undefined;
   Register: undefined;
+  ChangePassword: { currentPassword: string };
   ForgotPassword: undefined;
+  ResetPassword: { email: string };
   MainMenu: undefined;
   Alumnos: undefined;
   AlumnosListado: undefined;
@@ -336,10 +340,20 @@ function AppNavigator() {
           component={RegisterScreen}
           options={{ title: 'Registrarse' }}
         />
+        <Stack.Screen
+          name="ChangePassword"
+          component={ChangePasswordScreen}
+          options={{ title: 'Cambiar Contraseña', headerBackVisible: false }}
+        />
         <Stack.Screen 
           name="ForgotPassword" 
           component={ForgotPasswordScreen}
           options={{ title: 'Recuperar Contraseña' }}
+        />
+        <Stack.Screen
+          name="ResetPassword"
+          component={ResetPasswordScreen}
+          options={{ title: 'Nueva Contraseña' }}
         />
         <Stack.Screen 
           name="MainMenu" 
