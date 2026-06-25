@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, StyleSheet, Image, Dimensions } from 'react-native';
-import { Text, Button, Surface, IconButton, TouchableRipple } from 'react-native-paper';
+import { Text, Surface, IconButton, TouchableRipple } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/AppNavigator';
@@ -18,6 +18,7 @@ interface MenuItem {
   icon: string;
   color: string;
   route: 'Alumnos' | 'Cursos' | 'Materias' | 'Docentes' | 'Novedades' | 'Anexos' | 'Horarios' | 'Autoridades';
+  disabled?: boolean;
 }
 
 const menuItems: MenuItem[] = [
@@ -25,17 +26,22 @@ const menuItems: MenuItem[] = [
   { title: 'Cursos', icon: 'school', color: '#000000', route: 'Cursos' },
   { title: 'Materias', icon: 'book-open-variant', color: '#000000', route: 'Materias' },
   { title: 'Docentes', icon: 'glasses', color: '#000000', route: 'Docentes' },
-  { title: 'Novedades', icon: 'newspaper', color: '#000000', route: 'Novedades' },
-  { title: 'Anexos', icon: 'map-marker-multiple', color: '#000000', route: 'Anexos' },
-  { title: 'Horarios', icon: 'calendar-clock', color: '#000000', route: 'Horarios' },
-  { title: 'Autoridades', icon: 'shield-account', color: '#000000', route: 'Autoridades' },
+  { title: 'Novedades', icon: 'newspaper', color: '#000000', route: 'Novedades', disabled: true },
+  { title: 'Anexos', icon: 'map-marker-multiple', color: '#000000', route: 'Anexos', disabled: true },
+  { title: 'Horarios', icon: 'calendar-clock', color: '#000000', route: 'Horarios', disabled: true },
+  { title: 'Autoridades', icon: 'shield-account', color: '#000000', route: 'Autoridades', disabled: true },
 ];
 
 const MainMenu: React.FC = () => {
   const navigation = useNavigation<MainMenuNavigationProp>();
   const dispatch = useAppDispatch();
 
-  const handleMenuPress = (route: MenuItem['route']) => {
+  const handleMenuPress = (item: MenuItem) => {
+    if (item.disabled) {
+      return;
+    }
+
+    const route = item.route;
     navigation.navigate(route);
   };
 
@@ -60,21 +66,23 @@ const MainMenu: React.FC = () => {
           {menuItems.map((item, index) => (
             <TouchableRipple
               key={index}
-              onPress={() => handleMenuPress(item.route)}
-              style={[styles.card, { width: cardWidth }]}
+              onPress={() => handleMenuPress(item)}
+              disabled={item.disabled}
+              style={[styles.card, item.disabled && styles.disabledCard, { width: cardWidth }]}
             >
               <View style={styles.cardContent}>
                 <View style={styles.iconBackground}>
                   <IconButton
                     icon={item.icon}
                     size={36}
-                    iconColor={item.color}
+                    iconColor={item.disabled ? '#9E9E9E' : item.color}
                     style={styles.cardIcon}
                   />
                 </View>
-                <Text style={[styles.cardText, { color: item.color }]}>
+                <Text style={[styles.cardText, { color: item.disabled ? '#8A8A8A' : item.color }]}> 
                   {item.title}
                 </Text>
+                {item.disabled ? <Text style={styles.disabledText}>Próximamente</Text> : null}
               </View>
             </TouchableRipple>
           ))}
@@ -127,6 +135,12 @@ const styles = StyleSheet.create({
     elevation: 2,
     padding: 8,
   },
+  disabledCard: {
+    backgroundColor: '#ECEFF1',
+    borderColor: '#CFD8DC',
+    elevation: 0,
+    opacity: 0.75,
+  },
   cardContent: {
     alignItems: 'center',
   },
@@ -140,6 +154,11 @@ const styles = StyleSheet.create({
   cardText: {
     fontSize: 12,
     fontWeight: '500',
+    marginTop: 4,
+  },
+  disabledText: {
+    fontSize: 10,
+    color: '#9E9E9E',
     marginTop: 4,
   },
   logoutButton: {

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { NavigationContainer, useNavigation } from '@react-navigation/native';
-import { Text, View, StyleSheet, TouchableOpacity, ScrollView, Platform } from 'react-native';
-import { TouchableRipple, IconButton, Menu, Divider, Badge } from 'react-native-paper';
+import { Text, View, StyleSheet, Platform } from 'react-native';
+import { TouchableRipple, IconButton, Menu, Divider } from 'react-native-paper';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import HomeScreen from '../screens/HomeScreen';
@@ -55,12 +55,6 @@ export type RootStackParamList = {
   Settings: undefined;
 };
 
-const NOTIFICACIONES = [
-  { id: 1, titulo: 'Inscripciones Abiertas', fecha: '15/04/2026', descripcion: 'Las inscripciones para el ciclo lectivo 2026 están abiertas hasta el 30 de mayo.' },
-  { id: 2, titulo: 'Reunión de Docentes', fecha: '10/04/2026', descripcion: 'Se convoca a todos los docentes a la reunión de planificación el viernes 12 de abril.' },
-  { id: 3, titulo: 'Nuevo Curso de Informática', fecha: '05/04/2026', descripcion: 'Se inaugura el nuevo laboratorio de informática con equipos de última generación.' },
-];
-
 const Stack = createNativeStackNavigator<RootStackParamList>();
 type AppNavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
@@ -83,55 +77,14 @@ function HeaderTitle() {
 }
 
 function NotificationIcon() {
-  const navigation = useNavigation<AppNavigationProp>();
-  const [menuVisible, setMenuVisible] = useState(false);
-  const notificaciones = NOTIFICACIONES;
-
   return (
-    <Menu
-      visible={menuVisible}
-      onDismiss={() => setMenuVisible(false)}
-      anchor={
-        <View style={styles.bellWrapper}>
-          <IconButton
-            icon="bell"
-            size={24}
-            iconColor="#FFFFFF"
-            onPress={() => setMenuVisible(true)}
-          />
-          {notificaciones.length > 0 && (
-            <View style={styles.badge}>
-              <Text style={styles.badgeText}>
-                {notificaciones.length > 9 ? '9+' : notificaciones.length}
-              </Text>
-            </View>
-          )}
-        </View>
-      }
-      contentStyle={styles.notifMenuContent}
-    >
-      <View style={styles.notifHeader}>
-        <Text style={styles.notifTitle}>Novedades</Text>
-      </View>
-      <ScrollView style={styles.notifScroll} nestedScrollEnabled>
-        {notificaciones.map((n) => (
-          <View key={n.id}>
-            <TouchableOpacity
-              style={styles.notifItem}
-              onPress={() => {
-                setMenuVisible(false);
-                navigation.navigate('Novedades');
-              }}
-            >
-              <Text style={styles.notifItemTitle}>{n.titulo}</Text>
-              <Text style={styles.notifItemDate}>{n.fecha}</Text>
-              <Text style={styles.notifItemDesc} numberOfLines={2}>{n.descripcion}</Text>
-            </TouchableOpacity>
-            <Divider style={styles.notifDivider} />
-          </View>
-        ))}
-      </ScrollView>
-    </Menu>
+    <IconButton
+      icon="bell"
+      size={24}
+      iconColor="#B0BEC5"
+      disabled
+      style={styles.disabledBell}
+    />
   );
 }
 
@@ -240,68 +193,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  bellWrapper: {
-    marginRight: 0,
-  },
-  badge: {
-    position: 'absolute',
-    top: 4,
-    right: 6,
-    backgroundColor: '#F28C28',
-    borderRadius: 8,
-    minWidth: 16,
-    height: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 3,
-  },
-  badgeText: {
-    fontSize: 9,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  notifMenuContent: {
-    width: 280,
-    maxHeight: 400,
-    paddingTop: 0,
-    paddingBottom: 0,
-    backgroundColor: '#FFFFFF',
-  },
-  notifHeader: {
-    padding: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
-  },
-  notifTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#1F5FAF',
-    textAlign: 'center',
-  },
-  notifScroll: {
-    maxHeight: 340,
-  },
-  notifItem: {
-    padding: 12,
-  },
-  notifItemTitle: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#2B2B2B',
-    marginBottom: 2,
-  },
-  notifItemDate: {
-    fontSize: 11,
-    color: '#6B6B6B',
-    marginBottom: 4,
-  },
-  notifItemDesc: {
-    fontSize: 12,
-    color: '#4A4A4A',
-    lineHeight: 18,
-  },
-  notifDivider: {
-    backgroundColor: '#E0E0E0',
+  disabledBell: {
+    opacity: 0.65,
   },
   webScreenContent: {
     paddingHorizontal: '20%',
