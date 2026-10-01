@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { View, StyleSheet, Image, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
-import { Text, TextInput, Button, Surface, TouchableRipple, IconButton } from 'react-native-paper';
+import React, { useEffect, useState } from 'react';
+import { Alert, View, StyleSheet, Image, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import { Text, TextInput, Button, Surface, TouchableRipple } from 'react-native-paper';
+import * as LocalAuthentication from 'expo-local-authentication';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/AppNavigator';
@@ -8,15 +9,15 @@ import { useAppDispatch, useAppSelector } from '../hooks/useRedux';
 import { setUserToken, incrementLoginAttempt, checkLock, updateProfile } from '../slices/appSlice';
 import { login } from '../services/authService';
 import { registerLoginActivity } from '../services/loginActivityService';
-import { clearUserData } from '../utils/storage';
+import {
+  getSavedProfile,
+  getToken,
+  isBiometricLoginEnabled,
+  setBiometricLoginEnabled,
+} from '../utils/storage';
 
 
 type LoginScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Login'>;
-
-const MOCK_USER = {
-  email: 'admin@cens15.edu.ar',
-  password: 'Cens15App2026',
-};
 
 const LoginScreen: React.FC = () => {
   const dispatch = useAppDispatch();
@@ -27,11 +28,80 @@ const LoginScreen: React.FC = () => {
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
+  const [biometricLoading, setBiometricLoading] = useState(false);
 
   const isLocked = lockUntil && Date.now() < lockUntil;
   const remainingTime = lockUntil ? Math.ceil((lockUntil - Date.now()) / 1000 / 60) : 0;
 
- const handleLogin = async () => {
+  useEffect(() => {
+    const checkBiometricLogin = async () => {
+      if (Platform.OS === 'web') return;
+
+      const [enabled, token, hasHardware, enrolled] = await Promise.all([
+        isBiometricLoginEnabled(),
+        getToken(),
+        LocalAuthentication.hasHardwareAsync(),
+        LocalAuthentication.isEnrolledAsync(),
+      ]);
+      setBiometricAvailable(enabled && Boolean(token) && hasHardware && enrolled);
+    };
+
+    checkBiometricLogin();
+  }, []);
+
+  const enableBiometricLogin = async () => {
+    if (Platform.OS === 'web') return false;
+
+    const [hasHardware, enrolled] = await Promise.all([
+      LocalAuthentication.hasHardwareAsync(),
+      LocalAuthentication.isEnrolledAsync(),
+    ]);
+    if (hasHardware && enrolled) {
+      await setBiometricLoginEnabled(true);
+      return true;
+    }
+    return false;
+  };
+
+  const handleBiometricLogin = async () => {
+    setBiometricLoading(true);
+    setError('');
+    try {
+      const result = await LocalAuthentication.authenticateAsync({
+        promptMessage: 'Ingresá con tu huella digital',
+        cancelLabel: 'Cancelar',
+        disableDeviceFallback: true,
+      });
+      if (!result.success) return;
+
+      const [token, profile] = await Promise.all([getToken(), getSavedProfile()]);
+      if (!token) {
+        await setBiometricLoginEnabled(false);
+        setBiometricAvailable(false);
+        setError('La sesión guardada ya no está disponible. Ingresá con email y contraseña.');
+        return;
+      }
+
+      dispatch(setUserToken(token));
+      dispatch(
+        updateProfile({
+          userName: profile.userName || '',
+          userLastname: profile.userLastname || '',
+          userEmail: profile.userEmail || '',
+          userRole: profile.userRole || '',
+          userId: profile.userId || '',
+        })
+      );
+      navigation.reset({ index: 0, routes: [{ name: 'MainMenu' }] });
+    } catch {
+      setError('No se pudo validar la huella digital. Intentá nuevamente o ingresá con contraseña.');
+    } finally {
+      setBiometricLoading(false);
+    }
+  };
+
+  const handleLogin = async () => {
   dispatch(checkLock());
 
   if (isLocked) {
@@ -72,7 +142,14 @@ const LoginScreen: React.FC = () => {
     if (response.mustChangePassword) {
       navigation.navigate('ChangePassword', { currentPassword: password });
     } else {
-      navigation.navigate('MainMenu');
+      const biometricEnabled = await enableBiometricLogin();
+      if (biometricEnabled) {
+        Alert.alert(
+          'Huella habilitada',
+          'En próximos ingresos podés bloquear la sesión y entrar con tu huella digital.'
+        );
+      }
+      navigation.reset({ index: 0, routes: [{ name: 'MainMenu' }] });
     }
   } catch (err: any) {
     dispatch(incrementLoginAttempt());
@@ -93,7 +170,7 @@ const LoginScreen: React.FC = () => {
   } finally {
     setIsLoading(false);
   }
-};
+  };
   const handleRegister = () => {
     navigation.navigate('Register');
   };
@@ -122,39 +199,34 @@ const LoginScreen: React.FC = () => {
           <Text variant="headlineMedium" style={styles.title}>
             Iniciar Sesión
           </Text>
-          <View style={styles.inputContainer}>
-            <TextInput
-              label="Email"
-              value={email}
-              onChangeText={(text) => { setEmail(text); setError(''); }}
-              mode="outlined"
-              keyboardType="email-address"
-              autoCapitalize="none"
-              style={styles.passwordInput}
-              outlineColor="#E0E0E0"
-              activeOutlineColor="#1F5FAF"
-            />
-            <View style={styles.placeholder} />
-          </View>
-          <View style={styles.passwordContainer}>
-            <TextInput
-              label="Contraseña"
-              value={password}
-              onChangeText={(text) => { setPassword(text); setError(''); }}
-              mode="outlined"
-              secureTextEntry={!passwordVisible}
-              style={styles.passwordInput}
-              outlineColor="#E0E0E0"
-              activeOutlineColor="#1F5FAF"
-            />
-            <IconButton
-              icon={passwordVisible ? 'eye-off' : 'eye'}
-              size={20}
-              onPress={() => setPasswordVisible(!passwordVisible)}
-              style={styles.eyeButton}
-              iconColor="#6B6B6B"
-            />
-          </View>
+          <TextInput
+            label="Email"
+            value={email}
+            onChangeText={(text) => { setEmail(text); setError(''); }}
+            mode="outlined"
+            keyboardType="email-address"
+            autoCapitalize="none"
+            style={styles.input}
+            outlineColor="#E0E0E0"
+            activeOutlineColor="#1F5FAF"
+          />
+          <TextInput
+            label="Contraseña"
+            value={password}
+            onChangeText={(text) => { setPassword(text); setError(''); }}
+            mode="outlined"
+            secureTextEntry={!passwordVisible}
+            style={styles.input}
+            outlineColor="#E0E0E0"
+            activeOutlineColor="#1F5FAF"
+            right={
+              <TextInput.Icon
+                icon={passwordVisible ? 'eye-off' : 'eye'}
+                onPress={() => setPasswordVisible(!passwordVisible)}
+                color="#6B6B6B"
+              />
+            }
+          />
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
           <Button
             mode="contained"
@@ -165,6 +237,18 @@ const LoginScreen: React.FC = () => {
           >
             Iniciar Sesión
           </Button>
+          {biometricAvailable && (
+            <Button
+              mode="outlined"
+              icon="fingerprint"
+              onPress={handleBiometricLogin}
+              style={styles.biometricButton}
+              loading={biometricLoading}
+              disabled={isLoading || biometricLoading}
+            >
+              Ingresar con huella
+            </Button>
+          )}
           <View style={styles.linksContainer}>
             <TouchableRipple onPress={handleRegister} style={styles.link}>
               <Text style={styles.linkText}>Registrarse</Text>
@@ -206,34 +290,12 @@ const styles = StyleSheet.create({
   title: {
     marginBottom: 24,
     color: '#1F5FAF',
+    textAlign: 'center',
   },
   input: {
     width: '100%',
     marginBottom: 16,
     backgroundColor: '#FFFFFF',
-  },
-  inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    width: '100%',
-    marginBottom: 16,
-  },
-  passwordContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    width: '100%',
-    marginBottom: 16,
-  },
-  passwordInput: {
-    flex:1,
-    backgroundColor: '#FFFFFF',
-  },
-  placeholder: {
-    width: 32,
-    marginLeft: 4,
-  },
-  eyeButton: {
-    margin: 0,
   },
   errorText: {
     color: '#D6452D',
@@ -250,11 +312,17 @@ const styles = StyleSheet.create({
     marginTop: 8,
     backgroundColor: '#1F5FAF',
   },
+  biometricButton: {
+    width: '100%',
+    marginTop: 12,
+    borderColor: '#1F5FAF',
+  },
   linksContainer: {
     width: '100%',
     marginTop: 16,
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
   },
   link: {
     padding: 8,

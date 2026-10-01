@@ -6,6 +6,7 @@ const USER_NAME_KEY = 'user_name';
 const USER_LASTNAME_KEY = 'user_lastname';
 const USER_EMAIL_KEY = 'user_email';
 const USER_ROLE_KEY = 'user_role';
+const BIOMETRIC_LOGIN_ENABLED_KEY = 'biometric_login_enabled';
 
 export const saveToken = async (token: string) => {
   await AsyncStorage.setItem(TOKEN_KEY, token);
@@ -46,8 +47,28 @@ export const getSavedProfile = async () => {
   return { userName, userLastname, userEmail, userRole, userId };
 };
 
+export const isBiometricLoginEnabled = async () => {
+  return (await AsyncStorage.getItem(BIOMETRIC_LOGIN_ENABLED_KEY)) === 'true';
+};
+
+export const setBiometricLoginEnabled = async (enabled: boolean) => {
+  if (enabled) {
+    await AsyncStorage.setItem(BIOMETRIC_LOGIN_ENABLED_KEY, 'true');
+  } else {
+    await AsyncStorage.removeItem(BIOMETRIC_LOGIN_ENABLED_KEY);
+  }
+};
+
 export const clearUserData = async () => {
-  await AsyncStorage.multiRemove([TOKEN_KEY, USER_ID_KEY, USER_NAME_KEY, USER_LASTNAME_KEY, USER_EMAIL_KEY, USER_ROLE_KEY]);
+  await AsyncStorage.multiRemove([
+    TOKEN_KEY,
+    USER_ID_KEY,
+    USER_NAME_KEY,
+    USER_LASTNAME_KEY,
+    USER_EMAIL_KEY,
+    USER_ROLE_KEY,
+    BIOMETRIC_LOGIN_ENABLED_KEY,
+  ]);
 };
 
 function decodeJwtPayload(token: string): any {

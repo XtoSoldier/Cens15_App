@@ -1,17 +1,23 @@
-import React from 'react';
-import { View, StyleSheet, Image, Dimensions } from 'react-native';
-import { Text, Surface, IconButton, TouchableRipple } from 'react-native-paper';
+import React, { useRef, useState } from 'react';
+import {
+  GestureResponderEvent,
+  Image,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  View,
+} from 'react-native';
+import { ActivityIndicator, Text, Surface, IconButton, TouchableRipple } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/AppNavigator';
-import { useAppDispatch } from '../hooks/useRedux';
-import { logout } from '../slices/appSlice';
-import { clearUserData } from '../utils/storage';
 
 type MainMenuNavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
-const { width } = Dimensions.get('window');
-const cardWidth = (width - 48) / 2;
+const GRID_GAP = 12;
+const PULL_THRESHOLD = 64;
 
 interface MenuItem {
   title: string;
@@ -34,7 +40,18 @@ const menuItems: MenuItem[] = [
 
 const MainMenu: React.FC = () => {
   const navigation = useNavigation<MainMenuNavigationProp>();
-  const dispatch = useAppDispatch();
+  const [gridWidth, setGridWidth] = useState(0);
+  const [pullDistance, setPullDistance] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  const scrollOffset = useRef(0);
+  const touchStartY = useRef<number | null>(null);
+  const pullDistanceRef = useRef(0);
+
+  const columns = gridWidth >= 720 ? 4 : gridWidth >= 520 ? 3 : 2;
+  const availableCardWidth = gridWidth > 0
+    ? (gridWidth - GRID_GAP * (columns - 1)) / columns
+    : 140;
+  const cardWidth = Math.min(180, availableCardWidth);
 
   const handleMenuPress = (item: MenuItem) => {
     if (item.disabled) {
@@ -45,10 +62,44 @@ const MainMenu: React.FC = () => {
     navigation.navigate(route);
   };
 
-  const handleLogout = () => {
-    clearUserData();
-    dispatch(logout());
-    navigation.navigate('Login');
+  const updatePullDistance = (distance: number) => {
+    pullDistanceRef.current = distance;
+    setPullDistance(distance);
+  };
+
+  const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    scrollOffset.current = Math.max(0, event.nativeEvent.contentOffset.y);
+    if (scrollOffset.current > 0) touchStartY.current = null;
+  };
+
+  const handleTouchStart = (event: GestureResponderEvent) => {
+    if (Platform.OS !== 'web' || refreshing || scrollOffset.current > 0) return;
+    touchStartY.current = event.nativeEvent.pageY;
+  };
+
+  const handleTouchMove = (event: GestureResponderEvent) => {
+    if (Platform.OS !== 'web' || touchStartY.current === null || scrollOffset.current > 0) return;
+    const distance = Math.max(0, event.nativeEvent.pageY - touchStartY.current);
+    updatePullDistance(Math.min(96, distance * 0.5));
+  };
+
+  const finishPull = () => {
+    if (Platform.OS !== 'web') return;
+
+    touchStartY.current = null;
+    if (pullDistanceRef.current < PULL_THRESHOLD) {
+      updatePullDistance(0);
+      return;
+    }
+
+    setRefreshing(true);
+    updatePullDistance(PULL_THRESHOLD);
+    window.setTimeout(() => window.location.reload(), 250);
+  };
+
+  const cancelPull = () => {
+    touchStartY.current = null;
+    if (!refreshing) updatePullDistance(0);
   };
 
   return (
@@ -62,30 +113,58 @@ const MainMenu: React.FC = () => {
         <Text variant="headlineMedium" style={styles.title}>
           Menú Principal
         </Text>
-        <View style={styles.grid}>
-          {menuItems.map((item, index) => (
-            <TouchableRipple
-              key={index}
-              onPress={() => handleMenuPress(item)}
-              disabled={item.disabled}
-              style={[styles.card, item.disabled && styles.disabledCard, { width: cardWidth }]}
+        <View style={styles.scrollArea}>
+          <ScrollView
+            style={[styles.menuScroll, Platform.OS === 'web' && styles.webMenuScroll]}
+            contentContainerStyle={styles.menuScrollContent}
+            showsVerticalScrollIndicator
+            onScroll={handleScroll}
+            scrollEventThrottle={16}
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={finishPull}
+            onTouchCancel={cancelPull}
+          >
+            <View
+              style={styles.grid}
+              onLayout={(event) => setGridWidth(event.nativeEvent.layout.width)}
             >
-              <View style={styles.cardContent}>
-                <View style={styles.iconBackground}>
-                  <IconButton
-                    icon={item.icon}
-                    size={36}
-                    iconColor={item.disabled ? '#9E9E9E' : item.color}
-                    style={styles.cardIcon}
-                  />
-                </View>
-                <Text style={[styles.cardText, { color: item.disabled ? '#8A8A8A' : item.color }]}> 
-                  {item.title}
+              {menuItems.map((item) => (
+                <TouchableRipple
+                  key={item.route}
+                  onPress={() => handleMenuPress(item)}
+                  disabled={item.disabled}
+                  style={[styles.card, item.disabled && styles.disabledCard, { width: cardWidth }]}
+                >
+                  <View style={styles.cardContent}>
+                    <View style={styles.iconBackground}>
+                      <IconButton
+                        icon={item.icon}
+                        size={cardWidth < 150 ? 30 : 36}
+                        iconColor={item.disabled ? '#9E9E9E' : item.color}
+                        style={styles.cardIcon}
+                      />
+                    </View>
+                    <Text style={[styles.cardText, { color: item.disabled ? '#8A8A8A' : item.color }]}>
+                      {item.title}
+                    </Text>
+                    {item.disabled ? <Text style={styles.disabledText}>Próximamente</Text> : null}
+                  </View>
+                </TouchableRipple>
+              ))}
+            </View>
+          </ScrollView>
+          {(pullDistance > 0 || refreshing) && (
+            <View pointerEvents="none" style={styles.pullIndicator}>
+              {refreshing ? (
+                <ActivityIndicator size="small" color="#1F5FAF" />
+              ) : (
+                <Text style={styles.pullIndicatorText}>
+                  {pullDistance >= PULL_THRESHOLD ? 'Soltá para actualizar' : 'Deslizá para actualizar'}
                 </Text>
-                {item.disabled ? <Text style={styles.disabledText}>Próximamente</Text> : null}
-              </View>
-            </TouchableRipple>
-          ))}
+              )}
+            </View>
+          )}
         </View>
       </Surface>
     </View>
@@ -103,6 +182,7 @@ const styles = StyleSheet.create({
     width: '100%',
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
+    minHeight: 0,
   },
   logo: {
     width: 60,
@@ -111,16 +191,33 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   title: {
-    marginBottom: 24,
-    color: '#0000',
+    marginBottom: 16,
+    color: '#1F5FAF',
+  },
+  scrollArea: {
+    flex: 1,
+    minHeight: 0,
+    width: '100%',
+    position: 'relative',
+  },
+  menuScroll: {
+    flex: 1,
+    minHeight: 0,
+    width: '100%',
+  },
+  webMenuScroll: {
+    overscrollBehaviorY: 'contain',
+    touchAction: 'pan-y',
+  } as any,
+  menuScrollContent: {
+    paddingBottom: 16,
   },
   grid: {
-    flex: 1,
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
     width: '100%',
-    alignContent: 'flex-start',
+    gap: GRID_GAP,
   },
   card: {
     aspectRatio: 1,
@@ -131,7 +228,6 @@ const styles = StyleSheet.create({
     borderColor: '#E0E0E0',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 16,
     elevation: 2,
     padding: 8,
   },
@@ -161,11 +257,26 @@ const styles = StyleSheet.create({
     color: '#9E9E9E',
     marginTop: 4,
   },
-  logoutButton: {
-    width: '100%',
-    marginTop: 0,
-    marginBottom: 24,
-    backgroundColor: '#1F5FAF',
+  pullIndicator: {
+    position: 'absolute',
+    top: 8,
+    alignSelf: 'center',
+    minHeight: 36,
+    paddingHorizontal: 16,
+    borderRadius: 18,
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 4,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.16,
+    shadowRadius: 4,
+  },
+  pullIndicatorText: {
+    color: '#1F5FAF',
+    fontSize: 12,
+    fontWeight: '600',
   },
 });
 

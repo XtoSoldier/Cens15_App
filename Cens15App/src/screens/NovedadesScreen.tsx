@@ -644,7 +644,11 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   tabPressed: {
-    ...StyleSheet.absoluteFillObject,
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
     backgroundColor: 'rgba(31, 95, 175, 0.12)',
   },
   tabChipContent: { flexDirection: 'row', alignItems: 'center' },

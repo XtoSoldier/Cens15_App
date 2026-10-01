@@ -8,7 +8,13 @@ import * as DocumentPicker from 'expo-document-picker';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import CalificacionesScreen from './CalificacionesScreen';
 import ConstanciasTab from './ConstanciasTab';
-import { getInscripcionesByAlumno, AlumnoInscripcion } from '../services/alumnoService';
+import {
+  AlumnoDeletionInfo,
+  AlumnoInscripcion,
+  deleteAlumno,
+  getAlumnoDeletionInfo,
+  getInscripcionesByAlumno,
+} from '../services/alumnoService';
 import {
   AlumnoDocumento,
   DocumentoImageAsset,
@@ -24,6 +30,7 @@ import {
 } from '../services/alumnoDocumentoService';
 import { Curso, getCursos } from '../services/cursoService';
 import { createInscripcion, deleteInscripcion } from '../services/inscripcionService';
+import { useAppSelector } from '../hooks/useRedux';
 
 type AlumnoDetalleScreenRouteProp = RouteProp<RootStackParamList, 'AlumnoDetalle'>;
 type AlumnoDetalleScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'AlumnoDetalle'>;
@@ -161,6 +168,9 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
   const route = useRoute<AlumnoDetalleScreenRouteProp>();
   const alumno: any = route.params?.alumno || {} as any;
   const navigation = useNavigation<AlumnoDetalleScreenNavigationProp>();
+  const userRole = useAppSelector((state) => state.app.userRole);
+  const normalizedRole = userRole.replace(/\s/g, '').toLowerCase();
+  const canDeleteAlumno = normalizedRole === 'admin' || normalizedRole === 'superadmin';
 
   const [activeTab, setActiveTab] = useState<string>('datos');
   const [editMode, setEditMode] = useState(false);
@@ -206,6 +216,10 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
   const [deletingLoading, setDeletingLoading] = useState(false);
   const [deleteError, setDeleteError] = useState('');
   const [snackbarMessage, setSnackbarMessage] = useState('');
+  const [showDeleteAlumno, setShowDeleteAlumno] = useState(false);
+  const [alumnoDeletionInfo, setAlumnoDeletionInfo] = useState<AlumnoDeletionInfo | null>(null);
+  const [deletingAlumno, setDeletingAlumno] = useState(false);
+  const [deleteAlumnoError, setDeleteAlumnoError] = useState('');
 
   useEffect(() => {
     const loadInscripciones = async () => {
@@ -369,6 +383,38 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
     } catch (error: any) {
       setDeleteError(error?.message || 'No se pudo eliminar la inscripción');
       setDeletingLoading(false);
+    }
+  };
+
+  const handleOpenDeleteAlumno = async () => {
+    if (!alumno?.id) return;
+
+    setShowDeleteAlumno(true);
+    setAlumnoDeletionInfo(null);
+    setDeleteAlumnoError('');
+    setDeletingAlumno(true);
+    try {
+      setAlumnoDeletionInfo(await getAlumnoDeletionInfo(alumno.id));
+    } catch (error: any) {
+      setDeleteAlumnoError(error?.message || 'No se pudo verificar el historial del alumno');
+    } finally {
+      setDeletingAlumno(false);
+    }
+  };
+
+  const handleConfirmDeleteAlumno = async () => {
+    if (!alumno?.id) return;
+
+    setDeletingAlumno(true);
+    setDeleteAlumnoError('');
+    try {
+      await deleteAlumno(alumno.id);
+      setShowDeleteAlumno(false);
+      navigation.goBack();
+    } catch (error: any) {
+      setDeleteAlumnoError(error?.message || 'No se pudo eliminar el alumno');
+    } finally {
+      setDeletingAlumno(false);
     }
   };
 
@@ -730,6 +776,17 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
                 </Button>
               </View>
             )}
+            {canDeleteAlumno && !editMode && (
+              <Button
+                mode="outlined"
+                textColor="#C62828"
+                icon="account-remove"
+                onPress={handleOpenDeleteAlumno}
+                style={styles.deleteAlumnoButton}
+              >
+                Eliminar alumno
+              </Button>
+            )}
           </View>
         )}
 
@@ -1021,6 +1078,55 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
       </Snackbar>
 
       <Modal
+        visible={showDeleteAlumno}
+        transparent
+        animationType="fade"
+        onRequestClose={() => !deletingAlumno && setShowDeleteAlumno(false)}
+      >
+        <View style={styles.previewBackdrop}>
+          <View style={styles.previewHeader}>
+            <Text style={styles.previewTitle}>Eliminar alumno</Text>
+          </View>
+          <View style={styles.deleteModalBody}>
+            <Text style={styles.deleteModalText}>¿Eliminar a {alumnoNombreTitulo}?</Text>
+            {alumnoDeletionInfo ? (
+              <>
+                <Text style={styles.deleteModalSubText}>{alumnoDeletionInfo.mensaje}</Text>
+                {alumnoDeletionInfo.tieneDatosAcademicos && (
+                  <Text style={styles.deleteAlumnoWarning}>
+                    El alumno dejará de visualizarse, pero sus inscripciones, cursos y notas se conservarán.
+                  </Text>
+                )}
+              </>
+            ) : deletingAlumno ? (
+              <Text style={styles.deleteModalSubText}>Verificando historial académico...</Text>
+            ) : null}
+            {deleteAlumnoError ? <Text style={styles.errorText}>{deleteAlumnoError}</Text> : null}
+            <View style={styles.deleteModalActions}>
+              <Button
+                mode="outlined"
+                onPress={() => setShowDeleteAlumno(false)}
+                disabled={deletingAlumno}
+                style={{ marginRight: 8 }}
+              >
+                Cancelar
+              </Button>
+              <Button
+                mode="contained"
+                buttonColor="#C62828"
+                textColor="#FFFFFF"
+                onPress={handleConfirmDeleteAlumno}
+                loading={deletingAlumno}
+                disabled={deletingAlumno || !alumnoDeletionInfo}
+              >
+                Eliminar
+              </Button>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
         visible={!!deletingInscripcion}
         transparent
         animationType="fade"
@@ -1297,7 +1403,11 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   tabPressed: {
-    ...StyleSheet.absoluteFillObject,
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
     backgroundColor: 'rgba(31, 95, 175, 0.12)',
   },
   tabChipContent: { flexDirection: 'row', alignItems: 'center' },
@@ -1321,6 +1431,17 @@ const styles = StyleSheet.create({
     marginTop: 16,
     marginBottom: 32,
     paddingHorizontal: 8,
+  },
+  deleteAlumnoButton: {
+    marginTop: 8,
+    marginBottom: 24,
+    borderColor: '#C62828',
+  },
+  deleteAlumnoWarning: {
+    color: '#C62828',
+    fontWeight: '600',
+    marginTop: 12,
+    textAlign: 'center',
   },
   actionBtn: {
     flex: 1,

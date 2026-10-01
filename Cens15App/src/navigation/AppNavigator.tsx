@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { NavigationContainer, useNavigation } from '@react-navigation/native';
-import { Text, View, StyleSheet, Platform } from 'react-native';
+import { Text, View, StyleSheet, Platform, useWindowDimensions } from 'react-native';
 import { TouchableRipple, IconButton, Menu, Divider } from 'react-native-paper';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -105,9 +105,15 @@ function LoginStatusIcon() {
 
   const handleLogout = () => {
     setMenuVisible(false);
+    dispatch(logout());
+    navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+  };
+
+  const handleForgetDevice = () => {
+    setMenuVisible(false);
     clearUserData();
     dispatch(logout());
-    navigation.navigate('Login');
+    navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
   };
 
   const handleSettings = () => {
@@ -151,7 +157,13 @@ function LoginStatusIcon() {
           <Divider />
           <Menu.Item
             onPress={handleLogout}
-            title="Cerrar sesión"
+            title="Bloquear sesión"
+            leadingIcon="lock"
+          />
+          <Divider />
+          <Menu.Item
+            onPress={handleForgetDevice}
+            title="Olvidar este dispositivo"
             leadingIcon="logout"
             titleStyle={styles.logoutText}
           />
@@ -201,12 +213,18 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
     boxSizing: 'border-box' as any,
   },
+  mobileWebScreenContent: {
+    paddingHorizontal: 0,
+  },
 });
 
-function AppNavigator() {
+function AppNavigator({ initialRouteName = 'Home' }: { initialRouteName?: 'Home' | 'Login' }) {
+  const { width } = useWindowDimensions();
+
   return (
     <NavigationContainer>
       <Stack.Navigator
+        initialRouteName={initialRouteName}
         screenOptions={{
           headerShown: true,
           headerTitle: () => <HeaderTitle />,
@@ -219,7 +237,9 @@ function AppNavigator() {
           },
           gestureEnabled: true,
           headerRight: () => <HeaderRight />,
-          contentStyle: Platform.OS === 'web' ? styles.webScreenContent : undefined,
+          contentStyle: Platform.OS === 'web'
+            ? [styles.webScreenContent, width < 768 && styles.mobileWebScreenContent]
+            : undefined,
         }}
       >
         <Stack.Screen name="Home" component={HomeScreen} />

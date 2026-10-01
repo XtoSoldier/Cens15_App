@@ -10,6 +10,8 @@ export interface Alumno {
   fechaNacimiento?: string | null;
   genero?: Genero | null;
   domicilio?: string | null;
+  eliminado?: boolean;
+  fechaEliminacion?: string | null;
   datosNacimiento?: {
     localidad?: string | null;
     provincia?: string | null;
@@ -89,3 +91,18 @@ export const createAlumno = async (data: CreateAlumnoRequest) => {
     throw error;
   }
 };
+
+export interface AlumnoDeletionInfo {
+  alumnoId: number;
+  inscripcionesCount: number;
+  inscripcionesActivasCount: number;
+  calificacionesCount: number;
+  tieneDatosAcademicos: boolean;
+  mensaje: string;
+}
+
+export const getAlumnoDeletionInfo = (alumnoId: number): Promise<AlumnoDeletionInfo> =>
+  apiFetch(`Alumnos/${alumnoId}/deletion-info`);
+
+export const deleteAlumno = (alumnoId: number) =>
+  apiFetch(`Alumnos/${alumnoId}`, { method: 'DELETE' });
