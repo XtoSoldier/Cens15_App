@@ -1,5 +1,6 @@
 import { apiFetch } from './api';
 import { saveToken, saveUserId, saveUserProfile, getUserIdFromToken } from '../utils/storage';
+import { isSessionTokenUsable } from '../utils/session';
 
 interface LoginResponse {
   token: string;
@@ -36,6 +37,7 @@ export const login = async (email: string, password: string) => {
       userId: userId,
     });
 
+    if (!isSessionTokenUsable(loginData.token)) throw new Error('La sesion ha expirado');
     return loginData;
   } catch (error: any) {
     const message = String(error?.message || 'Error en autenticacion');

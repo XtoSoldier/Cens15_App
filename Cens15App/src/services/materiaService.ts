@@ -1,9 +1,11 @@
 import { apiFetch } from './api';
+import type { HorarioAnexo } from './horarioAnexoService';
 
 export interface MateriaDocente {
   docenteId: number;
   docente: string;
   rol: string;
+  activo: boolean;
 }
 
 export interface Materia {
@@ -13,6 +15,8 @@ export interface Materia {
   curso: string;
   division: string;
   docentes: MateriaDocente[];
+  cargaHoraria: number;
+  horarios: HorarioAnexo[];
 }
 
 export const getMaterias = async (): Promise<Materia[]> => {

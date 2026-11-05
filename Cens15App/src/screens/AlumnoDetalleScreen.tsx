@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, ScrollView, Alert, TouchableOpacity, Image, Modal, Linking } from 'react-native';
+import type { ScrollViewInstance } from 'react-native';
 import { TextInput, Text, Divider, IconButton, Button, DataTable, Snackbar } from 'react-native-paper';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -14,7 +15,10 @@ import {
   deleteAlumno,
   getAlumnoDeletionInfo,
   getInscripcionesByAlumno,
+  updateAlumno,
 } from '../services/alumnoService';
+import AlumnoBirthDateField from '../components/AlumnoBirthDateField';
+import { alumnoDateValue, nullableAlumnoFields } from '../utils/alumnoFields';
 import {
   AlumnoDocumento,
   DocumentoImageAsset,
@@ -174,11 +178,12 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
 
   const [activeTab, setActiveTab] = useState<string>('datos');
   const [editMode, setEditMode] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [formData, setFormData] = useState({
     nombre: alumno?.nombre ?? alumno?.raw?.nombres ?? '',
     apellido: alumno?.apellido ?? alumno?.raw?.apellidos ?? '',
     dni: alumno?.dni ?? alumno?.raw?.numeroDocumento ?? '',
-    fechaNacimiento: alumno?.fechaNacimiento ?? alumno?.raw?.fechaNacimiento ?? '',
+    fechaNacimiento: alumnoDateValue(alumno?.fechaNacimiento ?? alumno?.raw?.fechaNacimiento),
     domicilio: alumno?.domicilio ?? alumno?.raw?.domicilio ?? '',
     nacionalidad: alumno?.nacionalidad ?? alumno?.raw?.datosNacimiento?.pais ?? '',
     sexo: alumno?.sexo ?? alumno?.raw?.genero ?? '',
@@ -289,14 +294,14 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
     { key: 'calificaciones', label: 'Calificaciones', icon: 'clipboard-text' },
     { key: 'constancias', label: 'Constancias', icon: 'certificate' },
   ];
-  const tabsRef = React.useRef<ScrollView | null>(null);
+  const tabsRef = React.useRef<ScrollViewInstance | null>(null);
 
-  const handleSave = () => {
-    if (!formData.nombre || !formData.apellido || !formData.dni) {
-      Alert.alert('Error', 'Nombre, Apellido y DNI son obligatorios');
+  const handleSave = async () => {
+    if (!formData.nombre.trim() || !formData.apellido.trim()) {
+      Alert.alert('Error', 'Nombre y Apellido son obligatorios');
       return;
     }
-    if (formData.dni.length < 7 || formData.dni.length > 8) {
+    if (formData.dni.trim() && !/^\d{7,8}$/.test(formData.dni.trim())) {
       Alert.alert('Error', 'DNI debe tener 7 u 8 dígitos');
       return;
     }
@@ -305,9 +310,51 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
       return;
     }
 
-    setEditMode(false);
-    navigation.navigate('AlumnoDetalle', { alumno: { ...alumno, ...formData } });
-    Alert.alert('Éxito', 'Datos actualizados correctamente');
+    try {
+      setSaving(true);
+      const nullableFields = nullableAlumnoFields(formData.dni, formData.fechaNacimiento, formData.sexo);
+      // PUT replaces documentation too; fetch it before saving to preserve uploaded files.
+      const documentos = await getAlumnoDocumentos(alumno.id);
+      const request = {
+        nombres: formData.nombre.trim(),
+        apellidos: formData.apellido.trim(),
+        ...nullableFields,
+        domicilio: formData.domicilio,
+        datosNacimiento: {
+          pais: formData.paisNacimiento,
+          provincia: formData.provinciaNacimiento,
+          localidad: formData.localidadNacimiento,
+        },
+        contacto: {
+          telefonoAlumno: formData.telefono,
+          email: formData.email,
+          nombreEmergencia: formData.emergenciaNombre,
+          telefonoEmergencia: formData.emergenciaCelular,
+        },
+        documentos: documentos.map((documento) => ({
+          tipoDocumentoAlumnoId: documento.tipoDocumentoAlumnoId,
+          presentado: documento.presentado,
+          imagenUrl: documento.imagenUrl,
+          imagenesUrl: getDocumentoImages(documento),
+        })),
+      };
+      await updateAlumno(alumno.id, request);
+      navigation.setParams({ alumno: {
+        ...alumno,
+        ...formData,
+        dni: nullableFields.numeroDocumento,
+        fechaNacimiento: nullableFields.fechaNacimiento,
+        sexo: nullableFields.genero,
+        raw: { ...alumno.raw, ...request },
+      } });
+      setEditMode(false);
+      await loadDocumentos(false);
+      Alert.alert('Éxito', 'Datos actualizados correctamente');
+    } catch (error: any) {
+      Alert.alert('Error', error?.message || 'No se pudieron actualizar los datos');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleCancel = () => {
@@ -316,7 +363,7 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
       nombre: alumno?.nombre ?? alumno?.raw?.nombres ?? '',
       apellido: alumno?.apellido ?? alumno?.raw?.apellidos ?? '',
       dni: alumno?.dni ?? alumno?.raw?.numeroDocumento ?? '',
-      fechaNacimiento: alumno?.fechaNacimiento ?? alumno?.raw?.fechaNacimiento ?? '',
+      fechaNacimiento: alumnoDateValue(alumno?.fechaNacimiento ?? alumno?.raw?.fechaNacimiento),
       domicilio: alumno?.domicilio ?? alumno?.raw?.domicilio ?? '',
       nacionalidad: alumno?.nacionalidad ?? alumno?.raw?.datosNacimiento?.pais ?? '',
       sexo: alumno?.sexo ?? alumno?.raw?.genero ?? '',
@@ -593,6 +640,7 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
 
         {activeTab === 'datos' && (
           <TouchableOpacity
+            disabled={saving}
             onPress={() => {
               if (editMode) handleCancel();
               else setEditMode(true);
@@ -628,21 +676,18 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
               style={[styles.input, editMode && styles.inputEditable]}
             />
             <TextInput
-              label="DNI"
-              value={formData.dni}
+              label="DNI (opcional)"
+              value={editMode ? formData.dni : formData.dni || 'Sin informar'}
               onChangeText={(v) => updateField('dni', v)}
               editable={editMode}
               keyboardType="numeric"
               mode="outlined"
               style={[styles.input, editMode && styles.inputEditable]}
             />
-            <TextInput
-              label="Fecha de Nacimiento (DD/MM/AAAA)"
+            <AlumnoBirthDateField
               value={formData.fechaNacimiento}
-              onChangeText={(v) => updateField('fechaNacimiento', v)}
-              editable={editMode}
-              mode="outlined"
-              style={[styles.input, editMode && styles.inputEditable]}
+              onChange={(v) => updateField('fechaNacimiento', v)}
+              editable={editMode && !saving}
             />
             <TextInput
               label="Domicilio"
@@ -660,14 +705,16 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
               mode="outlined"
               style={[styles.input, editMode && styles.inputEditable]}
             />
-            <TextInput
-              label="Sexo"
-              value={formData.sexo}
-              onChangeText={(v) => updateField('sexo', v)}
-              editable={editMode}
-              mode="outlined"
-              style={[styles.input, editMode && styles.inputEditable]}
-            />
+            <Text>Sexo (opcional)</Text>
+            {editMode ? (
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: 16 }}>
+                {[['', 'Sin informar'], ['Varon', 'Varón'], ['Mujer', 'Mujer']].map(([value, label]) => (
+                  <Button key={value} disabled={saving} mode={formData.sexo === value ? 'contained' : 'outlined'} onPress={() => updateField('sexo', value)}>
+                    {label}
+                  </Button>
+                ))}
+              </View>
+            ) : <Text style={styles.input}>{formData.sexo === 'Varon' ? 'Varón' : formData.sexo || 'Sin informar'}</Text>}
 
             <Divider style={styles.divider} />
 
@@ -760,6 +807,7 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
                 <Button
                   mode="outlined"
                   onPress={handleCancel}
+                  disabled={saving}
                   style={[styles.actionBtn, styles.cancelBtn]}
                   labelStyle={styles.cancelBtnLabel}
                   icon="cancel"
@@ -769,6 +817,8 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
                 <Button
                   mode="contained"
                   onPress={handleSave}
+                  loading={saving}
+                  disabled={saving}
                   style={styles.actionBtn}
                   icon="content-save"
                 >
@@ -934,7 +984,7 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
             />
             <TextInput
               label="DNI"
-              value={alumno?.dni ?? ''}
+              value={formData.dni || 'Sin informar'}
               editable={false}
               mode="outlined"
               style={styles.input}
@@ -1081,7 +1131,7 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
         visible={showDeleteAlumno}
         transparent
         animationType="fade"
-        onRequestClose={() => !deletingAlumno && setShowDeleteAlumno(false)}
+        onRequestClose={() => { if (!deletingAlumno) setShowDeleteAlumno(false); }}
       >
         <View style={styles.previewBackdrop}>
           <View style={styles.previewHeader}>
@@ -1130,7 +1180,7 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
         visible={!!deletingInscripcion}
         transparent
         animationType="fade"
-        onRequestClose={() => !deletingLoading && setDeletingInscripcion(null)}
+        onRequestClose={() => { if (!deletingLoading) setDeletingInscripcion(null); }}
       >
         <View style={styles.previewBackdrop}>
           <View style={styles.previewHeader}>

@@ -6,9 +6,9 @@ export interface Alumno {
   id: number;
   nombres?: string | null;
   apellidos?: string | null;
-  numeroDocumento?: string | null;
-  fechaNacimiento?: string | null;
-  genero?: Genero | null;
+  numeroDocumento: string | null;
+  fechaNacimiento: string | null;
+  genero: Genero | null;
   domicilio?: string | null;
   eliminado?: boolean;
   fechaEliminacion?: string | null;
@@ -54,11 +54,11 @@ export const getInscripcionesByAlumno = async (alumnoId: number): Promise<Alumno
 };
 
 export interface CreateAlumnoRequest {
-  nombres?: string | null;
-  apellidos?: string | null;
-  numeroDocumento?: string | null;
-  fechaNacimiento?: string;
-  genero?: Genero;
+  nombres: string;
+  apellidos: string;
+  numeroDocumento: string | null;
+  fechaNacimiento: string | null;
+  genero: Genero | null;
   domicilio?: string | null;
   datosNacimiento?: {
     localidad?: string | null;
@@ -75,6 +75,7 @@ export interface CreateAlumnoRequest {
     tipoDocumentoAlumnoId: number;
     presentado: boolean;
     imagenUrl?: string | null;
+    imagenesUrl?: string[];
   }[];
 }
 
@@ -91,6 +92,9 @@ export const createAlumno = async (data: CreateAlumnoRequest) => {
     throw error;
   }
 };
+
+export const updateAlumno = (id: number, data: CreateAlumnoRequest): Promise<void> =>
+  apiFetch(`Alumnos/${id}`, { method: 'PUT', body: JSON.stringify(data) });
 
 export interface AlumnoDeletionInfo {
   alumnoId: number;

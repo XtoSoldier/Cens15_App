@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { NavigationContainer, useNavigation } from '@react-navigation/native';
+import React, { useEffect, useRef, useState } from 'react';
+import { NavigationContainer, useNavigation, useNavigationContainerRef } from '@react-navigation/native';
 import { Text, View, StyleSheet, Platform, useWindowDimensions } from 'react-native';
 import { TouchableRipple, IconButton, Menu, Divider } from 'react-native-paper';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -29,6 +29,7 @@ import SettingsScreen from '../screens/SettingsScreen';
 import { useAppSelector, useAppDispatch } from '../hooks/useRedux';
 import { logout } from '../slices/appSlice';
 import { clearUserData } from '../utils/storage';
+import { isSessionTokenUsable } from '../utils/session';
 
 export type RootStackParamList = {
   Home: undefined;
@@ -218,11 +219,24 @@ const styles = StyleSheet.create({
   },
 });
 
-function AppNavigator({ initialRouteName = 'Home' }: { initialRouteName?: 'Home' | 'Login' }) {
+function AppNavigator({ initialRouteName = 'Home', expirationVersion = 0 }: {
+  initialRouteName?: 'Home' | 'Login'; expirationVersion?: number;
+}) {
   const { width } = useWindowDimensions();
+  const token = useAppSelector((state) => state.app.userToken);
+  const authenticated = isSessionTokenUsable(token);
+  const navigationRef = useNavigationContainerRef<RootStackParamList>();
+  const handledExpiration = useRef(0);
+  const resetExpiredSession = () => {
+    if (expirationVersion > handledExpiration.current && navigationRef.isReady()) {
+      navigationRef.resetRoot({ index: 0, routes: [{ name: 'Login' }] });
+      handledExpiration.current = expirationVersion;
+    }
+  };
+  useEffect(resetExpiredSession, [expirationVersion, navigationRef]);
 
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef} onReady={resetExpiredSession}>
       <Stack.Navigator
         initialRouteName={initialRouteName}
         screenOptions={{
@@ -253,11 +267,6 @@ function AppNavigator({ initialRouteName = 'Home' }: { initialRouteName?: 'Home'
           component={RegisterScreen}
           options={{ title: 'Registrarse' }}
         />
-        <Stack.Screen
-          name="ChangePassword"
-          component={ChangePasswordScreen}
-          options={{ title: 'Cambiar Contraseña', headerBackVisible: false }}
-        />
         <Stack.Screen 
           name="ForgotPassword" 
           component={ForgotPasswordScreen}
@@ -267,6 +276,12 @@ function AppNavigator({ initialRouteName = 'Home' }: { initialRouteName?: 'Home'
           name="ResetPassword"
           component={ResetPasswordScreen}
           options={{ title: 'Nueva Contraseña' }}
+        />
+        {authenticated && <Stack.Group navigationKey="authenticated">
+        <Stack.Screen
+          name="ChangePassword"
+          component={ChangePasswordScreen}
+          options={{ title: 'Cambiar Contraseña', headerBackVisible: false }}
         />
         <Stack.Screen 
           name="MainMenu" 
@@ -348,6 +363,7 @@ function AppNavigator({ initialRouteName = 'Home' }: { initialRouteName?: 'Home'
           component={SettingsScreen}
           options={{ title: 'Configuración' }}
         />
+        </Stack.Group>}
       </Stack.Navigator>
     </NavigationContainer>
   );

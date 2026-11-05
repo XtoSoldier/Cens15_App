@@ -36,8 +36,20 @@ const ENV = {
 
 const currentEnv = __DEV__ ? ENV.dev : ENV.prod;
 
+const resolveApiUrl = (url: string) => {
+  if (!url.includes('{hostname}')) return url;
+  const host = Platform.OS === 'web'
+    ? (typeof window !== 'undefined' ? window.location.hostname : null)
+    : getExpoHost();
+  if (!host) {
+    throw new Error('INTRANET API URL requires a browser page hostname or an Expo host. For native builds, configure an explicit API server URL.');
+  }
+  return url.replace(/\{hostname\}/g, host);
+};
+
 export default {
   ...currentEnv,
+  API_URL: resolveApiUrl(currentEnv.API_URL),
   ENV_LABEL: process.env.EXPO_PUBLIC_ENV_LABEL || '',
   SHOW_ENV_INDICATOR: process.env.EXPO_PUBLIC_SHOW_ENV_INDICATOR === 'true',
 };

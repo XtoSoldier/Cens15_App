@@ -1,6 +1,5 @@
 import env from './env';
-import { apiFetch, getApiBaseUrl } from './api';
-import { getToken } from '../utils/storage';
+import { apiFetch, authenticatedApiRequest, getApiBaseUrl } from './api';
 
 export interface TipoDocumentoAlumno {
   id: number;
@@ -62,12 +61,8 @@ const appendFiles = (formData: FormData, files: DocumentoImageAsset[]) => {
 };
 
 const uploadDocumento = async (endpoint: string, formData: FormData) => {
-  const token = await getToken();
-  const response = await fetch(`${getApiBaseUrl()}/${endpoint}`, {
+  const response = await authenticatedApiRequest(endpoint, {
     method: /^AlumnoDocumentos\/\d+\/upload$/i.test(endpoint) ? 'PUT' : 'POST',
-    headers: {
-      ...(token && { Authorization: `Bearer ${token}` }),
-    },
     body: formData,
   });
 

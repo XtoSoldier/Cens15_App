@@ -1,14 +1,15 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, StyleSheet, ScrollView, TouchableOpacity, Modal, TouchableWithoutFeedback, ActivityIndicator } from 'react-native';
 import { Text, Surface, DataTable, Chip, IconButton, Avatar, Button } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
 import { useAppSelector, useAppDispatch } from '../hooks/useRedux';
 import { updateProfile } from '../slices/appSlice';
 import { getDocenteByUserId, getMisAlumnosParaCalificar, DocenteMateriaConAlumnosDto, AlumnoCalificacionSimpleDto } from '../services/docenteService';
-import { createCalificacion, updateCalificacion, SaveCalificacionRequest } from '../services/calificacionService';
+import { createCalificacion, updateCalificacion } from '../services/calificacionService';
 import { getUserIdFromToken } from '../utils/storage';
+import { Grado, GradeValues, GradeField, GRADE_OPTIONS, GRADE_LEGEND, gradeLabel, normalizeEstado, calculateGrades, editGrade, gradesFromCalificacion, buildSaveRequest, suggestedRecovery, isLegacy } from '../utils/calificaciones';
+import RecuperacionChoiceModal from '../components/RecuperacionChoiceModal';
 
-type Grado = '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' | 'A' | 'S/C' | '';
 type Situacion = 'R1' | 'R2' | 'R1+R2' | 'AP' | 'APE' | '';
 
 const SITUACIONES: { value: Situacion; label: string }[] = [
@@ -20,9 +21,10 @@ const SITUACIONES: { value: Situacion; label: string }[] = [
   { value: 'APE', label: 'Aprobado x Equivalencia' },
 ];
 
-const NOTAS_POSIBLES: Grado[] = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'A', 'S/C'];
+const NOTAS_POSIBLES = GRADE_OPTIONS;
 
-interface AlumnoRow {
+interface AlumnoRow extends GradeValues {
+  source: AlumnoCalificacionSimpleDto;
   alumnoId: number;
   alumnoNombre: string;
   cursadaMateriaId: number;
@@ -45,24 +47,12 @@ interface MateriaCurso {
   alumnos: AlumnoRow[];
 }
 
-function gradoFromDecimal(v: number | null | undefined): Grado {
-  if (v == null) return '';
-  const n = Math.round(v);
-  if (n >= 1 && n <= 10) return n.toString() as Grado;
-  return '';
-}
-
-function decimalFromGrado(g: Grado): number | null {
-  if (g === '' || g === 'A' || g === 'S/C') return null;
-  return parseInt(g, 10);
-}
-
-function situacionFromEstado(estado: number): Situacion {
-  switch (estado) {
-    case 1: return 'AP';
-    case 2: return 'R1';
-    case 3: return 'R2';
-    case 4: return 'R1+R2';
+function situacionFromEstado(estado?: GradeValues['estado'] | number): Situacion {
+  switch (normalizeEstado(estado)) {
+    case 'Aprobado': return 'AP';
+    case 'RecuperaPrimerCuatrimestre': return 'R1';
+    case 'RecuperaSegundoCuatrimestre': return 'R2';
+    case 'RecuperaAmbos': return 'R1+R2';
     default: return '';
   }
 }
@@ -79,12 +69,12 @@ function estadoFromSituacion(sit: Situacion): number {
 }
 
 function isAprobada(nota: string) {
-  const n = parseInt(nota);
+  const n = Number.parseFloat(nota);
   return !isNaN(n) && n >= 6;
 }
 
 function isReprobada(nota: string) {
-  const n = parseInt(nota);
+  const n = Number.parseFloat(nota);
   return !isNaN(n) && n < 6;
 }
 
@@ -112,11 +102,13 @@ function GradePickerModal({
   currentGrade,
   onSelect,
   onClose,
+  numericOnly = false,
 }: {
   visible: boolean;
   currentGrade: string;
   onSelect: (grade: Grado) => void;
   onClose: () => void;
+  numericOnly?: boolean;
 }) {
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -135,9 +127,10 @@ function GradePickerModal({
                 >
                   —
                 </Chip>
-                {NOTAS_POSIBLES.map((nota) => (
+                {NOTAS_POSIBLES.filter(nota => !numericOnly || (nota !== 'A' && nota !== 'S/C')).map((nota) => (
                   <Chip
                     key={nota}
+                    accessibilityLabel={gradeLabel(nota)}
                     selected={currentGrade === nota}
                     onPress={() => onSelect(nota)}
                     style={[
@@ -154,6 +147,7 @@ function GradePickerModal({
                   </Chip>
                 ))}
               </View>
+              <Text>{GRADE_LEGEND}</Text>
             </Surface>
           </TouchableWithoutFeedback>
         </View>
@@ -219,6 +213,8 @@ const DocenteCalificarScreen: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [docenteNombre, setDocenteNombre] = useState('');
+  const savingRows = useRef(new Set<number>());
+  const [pendingRecovery, setPendingRecovery] = useState<{ materiaIdx: number; alumnoIdx: number; draft: AlumnoRow } | null>(null);
 
   const [gradePicker, setGradePicker] = useState<{ visible: boolean; alumnoIdx: number; field: string; value: string }>({
     visible: false,
@@ -271,13 +267,9 @@ const DocenteCalificarScreen: React.FC = () => {
           alumnoNombre: a.alumnoNombre,
           cursadaMateriaId: a.cursadaMateriaId,
           calificacionId: a.calificacionId,
-          c1: gradoFromDecimal(a.c1Promedio),
-          c2: gradoFromDecimal(a.c2Promedio),
-          anual: gradoFromDecimal(a.promedioAnual),
-          diciembre: gradoFromDecimal(a.recuperacionDiciembre),
-          febrero: gradoFromDecimal(a.recuperacionMarzo),
-          final: gradoFromDecimal(a.calificacionFinal),
-          situacion: situacionFromEstado(a.estado),
+          source: a,
+          ...gradesFromCalificacion(a),
+          situacion: situacionFromEstado(gradesFromCalificacion(a).estado),
           saving: false,
         })),
       }));
@@ -293,92 +285,45 @@ const DocenteCalificarScreen: React.FC = () => {
 
   const pendingGrade = gradePicker.visible && selectedMateria ? selectedMateria.alumnos[gradePicker.alumnoIdx][gradePicker.field as keyof AlumnoRow] as Grado : '';
 
-  const doSaveGrade = async (materiaIdx: number, alumnoIdx: number, field: string, g: Grado) => {
-    const materia = materias[materiaIdx];
-    const alumno = materia.alumnos[alumnoIdx];
-    const califId = alumno.calificacionId;
-
-    const updated = [...materias];
-    updated[materiaIdx] = { ...updated[materiaIdx] };
-    updated[materiaIdx].alumnos = [...updated[materiaIdx].alumnos];
-    updated[materiaIdx].alumnos[alumnoIdx] = { ...alumno, saving: true };
-    setMaterias([...updated]);
-
+  const saveAlumno = async (draft: AlumnoRow) => {
+    const id = draft.cursadaMateriaId;
+    if (savingRows.current.has(id)) return;
+    savingRows.current.add(id);
+    const patchRow = (patch: Partial<AlumnoRow>) => setMaterias(current => current.map(m => ({ ...m, alumnos: m.alumnos.map(a => a.cursadaMateriaId === id ? { ...a, ...patch } : a) })));
+    patchRow({ saving: true });
+    setError('');
     try {
-      const body: SaveCalificacionRequest = {
-        cursadaMateriaId: alumno.cursadaMateriaId,
-        c1Promedio: field === 'c1' ? decimalFromGrado(g) : decimalFromGrado(alumno.c1),
-        c2Promedio: field === 'c2' ? decimalFromGrado(g) : decimalFromGrado(alumno.c2),
-        promedioAnual: field === 'anual' ? decimalFromGrado(g) : decimalFromGrado(alumno.anual),
-        recuperacionDiciembre: field === 'diciembre' ? decimalFromGrado(g) : decimalFromGrado(alumno.diciembre),
-        recuperacionMarzo: field === 'febrero' ? decimalFromGrado(g) : decimalFromGrado(alumno.febrero),
-        calificacionFinal: field === 'final' ? decimalFromGrado(g) : decimalFromGrado(alumno.final),
-        estado: 'EnCurso',
-      };
-
-      let result: any;
-      if (califId) {
-        result = await updateCalificacion(califId, body);
-      } else {
-        result = await createCalificacion(body);
-      }
-
-      updated[materiaIdx].alumnos[alumnoIdx] = {
-        ...updated[materiaIdx].alumnos[alumnoIdx],
-        [field]: g,
-        calificacionId: califId || (result && result.id) || null,
-        saving: false,
-      };
-      setMaterias([...updated]);
+      const body = buildSaveRequest(id, draft, draft.source);
+      let calificacionId = draft.calificacionId;
+      if (calificacionId) await updateCalificacion(calificacionId, body);
+      else calificacionId = (await createCalificacion(body)).id;
+      patchRow({ ...draft, calificacionId, saving: false });
     } catch (err: any) {
-      updated[materiaIdx].alumnos[alumnoIdx] = { ...updated[materiaIdx].alumnos[alumnoIdx], saving: false };
-      setMaterias([...updated]);
+      patchRow({ saving: false });
       setError(err?.message || 'Error al guardar la nota');
+    } finally {
+      savingRows.current.delete(id);
     }
   };
 
-  const doSaveSituacion = async (materiaIdx: number, alumnoIdx: number, sit: Situacion) => {
-    const materia = materias[materiaIdx];
-    const alumno = materia.alumnos[alumnoIdx];
-    const califId = alumno.calificacionId;
-
-    const updated = [...materias];
-    updated[materiaIdx] = { ...updated[materiaIdx] };
-    updated[materiaIdx].alumnos = [...updated[materiaIdx].alumnos];
-    updated[materiaIdx].alumnos[alumnoIdx] = { ...alumno, saving: true };
-    setMaterias([...updated]);
-
-    try {
-      const body: SaveCalificacionRequest = {
-        cursadaMateriaId: alumno.cursadaMateriaId,
-        c1Promedio: decimalFromGrado(alumno.c1),
-        c2Promedio: decimalFromGrado(alumno.c2),
-        promedioAnual: decimalFromGrado(alumno.anual),
-        recuperacionDiciembre: decimalFromGrado(alumno.diciembre),
-        recuperacionMarzo: decimalFromGrado(alumno.febrero),
-        calificacionFinal: decimalFromGrado(alumno.final),
-        estado: mapEstadoToApi(estadoFromSituacion(sit)),
-      };
-
-      let result: any;
-      if (califId) {
-        result = await updateCalificacion(califId, body);
-      } else {
-        result = await createCalificacion(body);
-      }
-
-      updated[materiaIdx].alumnos[alumnoIdx] = {
-        ...updated[materiaIdx].alumnos[alumnoIdx],
-        situacion: sit,
-        calificacionId: califId || (result && result.id) || null,
-        saving: false,
-      };
-      setMaterias([...updated]);
-    } catch (err: any) {
-      updated[materiaIdx].alumnos[alumnoIdx] = { ...updated[materiaIdx].alumnos[alumnoIdx], saving: false };
-      setMaterias([...updated]);
-      setError(err?.message || 'Error al guardar la situación');
+  const doSaveGrade = (materiaIdx: number, alumnoIdx: number, field: string, g: Grado) => {
+    const alumno = materias[materiaIdx].alumnos[alumnoIdx];
+    if (savingRows.current.has(alumno.cursadaMateriaId) || pendingRecovery) return;
+    const manual = field === 'anual' || field === 'final';
+    if (manual && (!isLegacy(alumno) || g === 'A' || g === 'S/C')) return;
+    const result = manual ? calculateGrades({ ...alumno, [field]: g }) : editGrade(alumno, field as GradeField, g);
+    const draft = { ...alumno, ...result, situacion: isLegacy(result) ? alumno.situacion : situacionFromEstado(result.estado) };
+    if (result.needsChoice) {
+      setPendingRecovery({ materiaIdx, alumnoIdx, draft });
+      return;
     }
+    void saveAlumno(draft);
+  };
+
+  const doSaveSituacion = (materiaIdx: number, alumnoIdx: number, sit: Situacion) => {
+    const alumno = materias[materiaIdx].alumnos[alumnoIdx];
+    if (!isLegacy(alumno) || pendingRecovery) return;
+    void saveAlumno({ ...alumno, situacion: sit, estado: mapEstadoToApi(estadoFromSituacion(sit)) });
   };
 
   const handleGradeSelect = (grade: Grado) => {
@@ -408,7 +353,7 @@ const DocenteCalificarScreen: React.FC = () => {
     );
   }
 
-  if (error) {
+  if (error && materias.length === 0) {
     return (
       <View style={[styles.container, { justifyContent: 'center', alignItems: 'center', padding: 24 }]}>
         <IconButton icon="alert-circle" size={48} iconColor="#C62828" />
@@ -436,7 +381,9 @@ const DocenteCalificarScreen: React.FC = () => {
         </View>
 
         {error ? <Text style={styles.saveErrorText}>{error}</Text> : null}
+        <Text>{GRADE_LEGEND}</Text>
 
+        <ScrollView horizontal showsHorizontalScrollIndicator>
         <ScrollView showsVerticalScrollIndicator={false} style={styles.tableScroll}>
           <DataTable style={styles.table}>
             <DataTable.Header style={styles.headerRow}>
@@ -462,6 +409,8 @@ const DocenteCalificarScreen: React.FC = () => {
                 {(['c1', 'c2', 'anual', 'diciembre', 'febrero', 'final'] as const).map((field) => (
                   <DataTable.Cell key={field} style={styles.colNota}>
                     <TouchableOpacity
+                      accessibilityLabel={gradeLabel(alumno[field])}
+                      disabled={alumno.saving || pendingRecovery !== null || ((field === 'anual' || field === 'final') && !isLegacy(alumno))}
                       onPress={() => setGradePicker({ visible: true, alumnoIdx: idx, field, value: alumno[field] })}
                       style={styles.gradeCell}
                     >
@@ -473,6 +422,7 @@ const DocenteCalificarScreen: React.FC = () => {
                 ))}
                 <DataTable.Cell style={styles.colSit}>
                   <TouchableOpacity
+                    disabled={alumno.saving || pendingRecovery !== null || !isLegacy(alumno)}
                     onPress={() => setSitPicker({ visible: true, alumnoIdx: idx, value: alumno.situacion })}
                     style={styles.sitCell}
                   >
@@ -485,13 +435,26 @@ const DocenteCalificarScreen: React.FC = () => {
             ))}
           </DataTable>
         </ScrollView>
+        </ScrollView>
 
         <GradePickerModal
           visible={gradePicker.visible}
           currentGrade={pendingGrade}
+          numericOnly={gradePicker.field === 'anual' || gradePicker.field === 'final'}
           onSelect={handleGradeSelect}
           onClose={() => setGradePicker({ ...gradePicker, visible: false })}
         />
+
+        {pendingRecovery && <RecuperacionChoiceModal
+          suggested={suggestedRecovery(pendingRecovery.draft)}
+          onCancel={() => setPendingRecovery(null)}
+          onConfirm={(choice) => {
+            const result = calculateGrades({ ...pendingRecovery.draft, recuperacionExcepcional: choice });
+            const draft = { ...pendingRecovery.draft, ...result, situacion: situacionFromEstado(result.estado) };
+            setPendingRecovery(null);
+            void saveAlumno(draft);
+          }}
+        />}
 
         <SituacionPickerModal
           visible={sitPicker.visible}

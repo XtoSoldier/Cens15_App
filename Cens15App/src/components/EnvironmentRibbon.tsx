@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Linking, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import env from '../services/env';
+import { checkApiHealth } from '../services/healthService';
 
 const API_CHECK_INTERVAL_MS = 2000;
 const API_CHECK_TIMEOUT_MS = 1500;
@@ -17,12 +18,8 @@ const EnvironmentRibbon = () => {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), API_CHECK_TIMEOUT_MS);
       try {
-        await fetch(`${env.API_URL}/auth/login?status=${Date.now()}`, {
-          ...(Platform.OS === 'web' ? { mode: 'no-cors' as RequestMode } : {}),
-          cache: 'no-store',
-          signal: controller.signal,
-        });
-        if (mounted) setApiStatus('up');
+        const healthy = await checkApiHealth(env.API_URL, controller.signal);
+        if (mounted) setApiStatus(healthy ? 'up' : 'down');
       } catch {
         if (mounted) setApiStatus('down');
       } finally {

@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { decodeJwtPayload, emitSessionExpired, setSessionCredential, tokenDeadline } from './session';
 
 const TOKEN_KEY = 'user_token';
 const USER_ID_KEY = 'user_id';
@@ -8,17 +9,47 @@ const USER_EMAIL_KEY = 'user_email';
 const USER_ROLE_KEY = 'user_role';
 const BIOMETRIC_LOGIN_ENABLED_KEY = 'biometric_login_enabled';
 
-export const saveToken = async (token: string) => {
+// Serialize credential operations so an old read/401 cannot remove a newer login.
+let credentialQueue: Promise<unknown> = Promise.resolve();
+function withCredentialLock<T>(operation: () => Promise<T>): Promise<T> {
+  const result = credentialQueue.then(operation);
+  credentialQueue = result.catch(() => undefined);
+  return result;
+}
+
+export const saveToken = (token: string) => withCredentialLock(async () => {
+  const deadline = tokenDeadline(token);
+  if (deadline === null || Date.now() >= deadline) throw new Error('La sesion recibida no es valida o ha expirado');
   await AsyncStorage.setItem(TOKEN_KEY, token);
-};
+  setSessionCredential(token);
+});
 
-export const getToken = async () => {
-  return await AsyncStorage.getItem(TOKEN_KEY);
-};
+export const getToken = () => withCredentialLock(async () => {
+  const token = await AsyncStorage.getItem(TOKEN_KEY);
+  const deadline = token ? tokenDeadline(token) : null;
+  if (token && (deadline === null || Date.now() >= deadline)) {
+    setSessionCredential(null);
+    emitSessionExpired();
+    await AsyncStorage.removeItem(TOKEN_KEY);
+    return null;
+  }
+  setSessionCredential(token);
+  return token;
+});
 
-export const removeToken = async () => {
+export const removeToken = () => withCredentialLock(async () => {
+  setSessionCredential(null);
   await AsyncStorage.removeItem(TOKEN_KEY);
-};
+});
+
+export const expireSessionCredential = (requestToken: string) => withCredentialLock(async () => {
+  const current = await AsyncStorage.getItem(TOKEN_KEY);
+  if (current !== requestToken) return false;
+  setSessionCredential(null);
+  emitSessionExpired();
+  await AsyncStorage.removeItem(TOKEN_KEY);
+  return true;
+});
 
 export const saveUserId = async (userId: string) => {
   if (userId) await AsyncStorage.setItem(USER_ID_KEY, userId);
@@ -60,8 +91,8 @@ export const setBiometricLoginEnabled = async (enabled: boolean) => {
 };
 
 export const clearUserData = async () => {
+  await removeToken();
   await AsyncStorage.multiRemove([
-    TOKEN_KEY,
     USER_ID_KEY,
     USER_NAME_KEY,
     USER_LASTNAME_KEY,
@@ -71,21 +102,9 @@ export const clearUserData = async () => {
   ]);
 };
 
-function decodeJwtPayload(token: string): any {
-  try {
-    const parts = token.split('.');
-    if (parts.length !== 3) return null;
-    const payload = parts[1];
-    const decoded = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
-    return JSON.parse(decoded);
-  } catch {
-    return null;
-  }
-}
-
 export const getUserIdFromToken = async (): Promise<string | null> => {
   const token = await getToken();
   if (!token) return null;
   const payload = decodeJwtPayload(token);
-  return payload?.sub || null;
+  return typeof payload?.sub === 'string' ? payload.sub : null;
 };

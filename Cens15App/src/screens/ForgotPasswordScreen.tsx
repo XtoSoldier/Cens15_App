@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, Image, Alert } from 'react-native';
+import { StyleSheet, Image } from 'react-native';
 import { Text, TextInput, Button, Surface } from 'react-native-paper';
 import { KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
@@ -13,29 +13,26 @@ const ForgotPasswordScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp>();
   const [email, setEmail] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [successMessage, setSuccessMessage] = useState('');
-  const [requestedEmail, setRequestedEmail] = useState('');
+  const [error, setError] = useState('');
 
   const handleSubmit = async () => {
+    if (isLoading) return;
+    setError('');
     const normalizedEmail = email.trim();
     if (!normalizedEmail) {
-      Alert.alert('Error', 'Por favor ingresá tu correo electrónico');
+      setError('Por favor ingresá tu correo electrónico');
       return;
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
-      Alert.alert('Error', 'Correo electrónico inválido');
+      setError('Correo electrónico inválido');
       return;
     }
     setIsLoading(true);
-    setSuccessMessage('');
     try {
       await requestPasswordReset(normalizedEmail);
-      setRequestedEmail(normalizedEmail);
-      setSuccessMessage(
-        'Si su correo se encuentra registrado, recibirá el código de reactivación para cambiar su contraseña.'
-      );
+      navigation.navigate('ResetPassword', { email: normalizedEmail });
     } catch (error: any) {
-      Alert.alert('Error', error?.message || 'No se pudo enviar el código de recuperación');
+      setError(error?.message || 'No se pudo enviar el código de recuperación');
     } finally {
       setIsLoading(false);
     }
@@ -62,12 +59,13 @@ const ForgotPasswordScreen: React.FC = () => {
             Recuperar Contraseña
           </Text>
           <Text variant="bodyMedium" style={styles.subtitle}>
-            Ingresá tu correo para recibir un código de reactivación
+             Ingresá tu correo para solicitar un código de acceso único
           </Text>
           <TextInput
             label="Correo Electrónico"
             value={email}
-            onChangeText={setEmail}
+            onChangeText={(value) => { setEmail(value); setError(''); }}
+            disabled={isLoading}
             mode="outlined"
             keyboardType="email-address"
             autoCapitalize="none"
@@ -75,7 +73,7 @@ const ForgotPasswordScreen: React.FC = () => {
             outlineColor="#E0E0E0"
             activeOutlineColor="#1F5FAF"
           />
-          {successMessage ? <Text style={styles.successMessage}>{successMessage}</Text> : null}
+          {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
           <Button
             mode="contained"
             onPress={handleSubmit}
@@ -83,18 +81,8 @@ const ForgotPasswordScreen: React.FC = () => {
             loading={isLoading}
             disabled={isLoading}
           >
-            {successMessage ? 'Reenviar Código' : 'Enviar código de reactivación'}
+            Enviar codigo
           </Button>
-          {successMessage ? (
-            <Button
-              mode="outlined"
-              onPress={() => navigation.navigate('ResetPassword', { email: requestedEmail || email.trim() })}
-              style={styles.codeButton}
-              disabled={isLoading}
-            >
-              Ingresar código recibido
-            </Button>
-          ) : null}
         </Surface>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -144,19 +132,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
     backgroundColor: '#F28C28',
   },
-  codeButton: {
-    width: '100%',
-    marginTop: 12,
-  },
-  successMessage: {
-    width: '100%',
-    marginBottom: 12,
-    padding: 12,
-    borderRadius: 8,
-    backgroundColor: '#E8F5E9',
-    color: '#2E7D32',
-    textAlign: 'center',
-  },
+  error: { color: '#C62828', textAlign: 'center', marginBottom: 12, width: '100%' },
 });
 
 export default ForgotPasswordScreen;

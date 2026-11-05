@@ -96,7 +96,7 @@ const ConstanciasTab: React.FC<{ alumno: any }> = ({ alumno }) => {
               <View style={styles.previewDatos}>
                 <Text style={styles.previewDatosTitle}>Datos que se incluirán:</Text>
                 <Text style={styles.previewDatosItem}>Nombre: {alumno?.nombre} {alumno?.apellido}</Text>
-                <Text style={styles.previewDatosItem}>DNI: {alumno?.dni}</Text>
+                <Text style={styles.previewDatosItem}>DNI: {alumno?.dni || 'Sin informar'}</Text>
                 <Text style={styles.previewDatosItem}>Curso: {alumno?.curso}</Text>
               </View>
             </View>

@@ -1,4 +1,5 @@
 import { apiFetch } from './api';
+import type { CalificacionMetadata } from './calificacionService';
 
 export interface DocenteMateriaDto {
   materiaId: number;
@@ -19,7 +20,7 @@ export interface DocenteDto {
   materias: DocenteMateriaDto[];
 }
 
-export interface AlumnoCalificacionSimpleDto {
+export interface AlumnoCalificacionSimpleDto extends CalificacionMetadata {
   alumnoId: number;
   alumnoNombre: string;
   cursadaMateriaId: number;

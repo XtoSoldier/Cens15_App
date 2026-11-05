@@ -9,6 +9,7 @@ import { useAppDispatch, useAppSelector } from '../hooks/useRedux';
 import { setUserToken, incrementLoginAttempt, checkLock, updateProfile } from '../slices/appSlice';
 import { login } from '../services/authService';
 import { registerLoginActivity } from '../services/loginActivityService';
+import { isSessionTokenUsable } from '../utils/session';
 import {
   getSavedProfile,
   getToken,
@@ -22,7 +23,7 @@ type LoginScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, '
 const LoginScreen: React.FC = () => {
   const dispatch = useAppDispatch();
   const navigation = useNavigation<LoginScreenNavigationProp>();
-  const { loginAttempts, lockUntil } = useAppSelector((state) => state.app);
+  const { loginAttempts, lockUntil, userToken } = useAppSelector((state) => state.app);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [passwordVisible, setPasswordVisible] = useState(false);
@@ -30,6 +31,20 @@ const LoginScreen: React.FC = () => {
   const [error, setError] = useState('');
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [biometricLoading, setBiometricLoading] = useState(false);
+  const [destination, setDestination] = useState<
+    { name: 'MainMenu'; token: string } | { name: 'ChangePassword'; token: string; currentPassword: string } | null
+  >(null);
+
+  // Navigate after Redux has committed the authenticated stack, not in the login handler.
+  useEffect(() => {
+    if (!destination || userToken !== destination.token || !isSessionTokenUsable(userToken)) return;
+    setDestination(null);
+    if (destination.name === 'ChangePassword') {
+      navigation.navigate('ChangePassword', { currentPassword: destination.currentPassword });
+    } else {
+      navigation.reset({ index: 0, routes: [{ name: 'MainMenu' }] });
+    }
+  }, [destination, userToken, navigation]);
 
   const isLocked = lockUntil && Date.now() < lockUntil;
   const remainingTime = lockUntil ? Math.ceil((lockUntil - Date.now()) / 1000 / 60) : 0;
@@ -76,8 +91,7 @@ const LoginScreen: React.FC = () => {
       if (!result.success) return;
 
       const [token, profile] = await Promise.all([getToken(), getSavedProfile()]);
-      if (!token) {
-        await setBiometricLoginEnabled(false);
+      if (!token || !isSessionTokenUsable(token)) {
         setBiometricAvailable(false);
         setError('La sesión guardada ya no está disponible. Ingresá con email y contraseña.');
         return;
@@ -93,7 +107,7 @@ const LoginScreen: React.FC = () => {
           userId: profile.userId || '',
         })
       );
-      navigation.reset({ index: 0, routes: [{ name: 'MainMenu' }] });
+      setDestination({ name: 'MainMenu', token });
     } catch {
       setError('No se pudo validar la huella digital. Intentá nuevamente o ingresá con contraseña.');
     } finally {
@@ -126,6 +140,8 @@ const LoginScreen: React.FC = () => {
       reason: response.mustChangePassword ? 'Login con cambio de contraseña pendiente' : 'Login exitoso',
     });
 
+    if (!isSessionTokenUsable(response.token)) throw new Error('La sesion ha expirado');
+
     // 🔐 Guardar token en Redux
     dispatch(setUserToken(response.token));
 
@@ -140,7 +156,7 @@ const LoginScreen: React.FC = () => {
     );
 
     if (response.mustChangePassword) {
-      navigation.navigate('ChangePassword', { currentPassword: password });
+      setDestination({ name: 'ChangePassword', token: response.token, currentPassword: password });
     } else {
       const biometricEnabled = await enableBiometricLogin();
       if (biometricEnabled) {
@@ -149,7 +165,7 @@ const LoginScreen: React.FC = () => {
           'En próximos ingresos podés bloquear la sesión y entrar con tu huella digital.'
         );
       }
-      navigation.reset({ index: 0, routes: [{ name: 'MainMenu' }] });
+      if (isSessionTokenUsable(response.token)) setDestination({ name: 'MainMenu', token: response.token });
     }
   } catch (err: any) {
     dispatch(incrementLoginAttempt());

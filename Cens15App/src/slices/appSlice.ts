@@ -1,4 +1,5 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
+import { isSessionTokenUsable } from '../utils/session';
 
 interface AppState {
   isLoading: boolean;
@@ -35,7 +36,7 @@ const appSlice = createSlice({
     },
 
     setUserToken: (state, action: PayloadAction<string | null>) => {
-      state.userToken = action.payload;
+      state.userToken = isSessionTokenUsable(action.payload) ? action.payload : null;
 
       if (action.payload) {
         state.loginAttempts = 0;
@@ -83,6 +84,7 @@ const appSlice = createSlice({
         userId?: string;
       }>
     ) => {
+      if (!isSessionTokenUsable(state.userToken)) return;
       if (action.payload.userName !== undefined)
         state.userName = action.payload.userName;
 

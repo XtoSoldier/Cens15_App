@@ -34,7 +34,7 @@ const menuItems: MenuItem[] = [
   { title: 'Docentes', icon: 'glasses', color: '#000000', route: 'Docentes' },
   { title: 'Novedades', icon: 'newspaper', color: '#000000', route: 'Novedades', disabled: true },
   { title: 'Anexos', icon: 'map-marker-multiple', color: '#000000', route: 'Anexos', disabled: true },
-  { title: 'Horarios', icon: 'calendar-clock', color: '#000000', route: 'Horarios', disabled: true },
+  { title: 'Horarios', icon: 'calendar-clock', color: '#000000', route: 'Horarios' },
   { title: 'Autoridades', icon: 'shield-account', color: '#000000', route: 'Autoridades', disabled: true },
 ];
 

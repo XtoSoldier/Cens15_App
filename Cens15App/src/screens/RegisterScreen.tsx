@@ -1,32 +1,36 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, Image, Alert } from 'react-native';
+import { StyleSheet, Image } from 'react-native';
 import { Text, TextInput, Button, Surface } from 'react-native-paper';
 import { KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { requestInitialAccess } from '../services/authService';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { RootStackParamList } from '../navigation/AppNavigator';
 
 const RegisterScreen: React.FC = () => {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList, 'Register'>>();
   const [email, setEmail] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState('');
 
   const handleRegister = async () => {
+    if (isLoading) return;
+    setError('');
     const normalizedEmail = email.trim();
     if (!normalizedEmail) {
-      Alert.alert('Error', 'Por favor ingresá tu correo electrónico');
+      setError('Por favor ingresá tu correo electrónico');
       return;
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
-      Alert.alert('Error', 'Correo electrónico inválido');
+      setError('Correo electrónico inválido');
       return;
     }
     setIsLoading(true);
     try {
       await requestInitialAccess(normalizedEmail);
-      Alert.alert(
-        'Revisá tu correo',
-        'Si el correo está registrado, se envió un email con la clave para ingresar por primera vez.'
-      );
+      navigation.navigate('ResetPassword', { email: normalizedEmail });
     } catch (error: any) {
-      Alert.alert('Error', error?.message || 'No se pudo solicitar el acceso inicial');
+      setError(error?.message || 'No se pudo solicitar el acceso inicial');
     } finally {
       setIsLoading(false);
     }
@@ -52,10 +56,12 @@ const RegisterScreen: React.FC = () => {
           <Text variant="headlineMedium" style={styles.title}>
             Registrarse
           </Text>
+          <Text style={styles.description}>Solicitá el acceso por correo para un usuario previamente creado por el administrador.</Text>
           <TextInput
             label="Correo electrónico"
             value={email}
-            onChangeText={setEmail}
+            onChangeText={(value) => { setEmail(value); setError(''); }}
+            disabled={isLoading}
             mode="outlined"
             keyboardType="email-address"
             autoCapitalize="none"
@@ -63,6 +69,7 @@ const RegisterScreen: React.FC = () => {
             outlineColor="#E0E0E0"
             activeOutlineColor="#1F5FAF"
           />
+          {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
           <Button
             mode="contained"
             onPress={handleRegister}
@@ -70,7 +77,7 @@ const RegisterScreen: React.FC = () => {
             loading={isLoading}
             disabled={isLoading}
           >
-            Registrarse
+            Enviar codigo
           </Button>
         </Surface>
       </ScrollView>
@@ -111,6 +118,8 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     backgroundColor: '#FFFFFF',
   },
+  description: { color: '#4A4A4A', textAlign: 'center', marginBottom: 16 },
+  error: { color: '#C62828', textAlign: 'center', marginBottom: 12, width: '100%' },
   registerButton: {
     width: '100%',
     marginTop: 8,

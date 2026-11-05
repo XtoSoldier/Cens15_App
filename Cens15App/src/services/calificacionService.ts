@@ -1,9 +1,24 @@
-import { apiFetch, getApiBaseUrl } from './api';
-import { getToken } from '../utils/storage';
+import { apiFetch, authenticatedApiRequest } from './api';
 
 export type EstadoMateria = 'EnCurso' | 'Aprobado' | 'RecuperaPrimerCuatrimestre' | 'RecuperaSegundoCuatrimestre' | 'RecuperaAmbos';
+export type CondicionNota = 'Numerica' | 'Ausente' | 'SinCalificar';
+export type RecuperacionExcepcional = Exclude<EstadoMateria, 'EnCurso' | 'Aprobado'>;
 
-export interface Calificacion {
+export interface CalificacionMetadata {
+  c1Nota1?: number | null;
+  c1Nota2?: number | null;
+  c1Nota3?: number | null;
+  c2Nota1?: number | null;
+  c2Nota2?: number | null;
+  c2Nota3?: number | null;
+  c1Condicion?: CondicionNota;
+  c2Condicion?: CondicionNota;
+  diciembreCondicion?: CondicionNota;
+  marzoCondicion?: CondicionNota;
+  recuperacionExcepcional?: RecuperacionExcepcional | null;
+}
+
+export interface Calificacion extends CalificacionMetadata {
   id: number;
   cursadaMateriaId: number;
   materiaNombre: string;
@@ -16,7 +31,7 @@ export interface Calificacion {
   estado: EstadoMateria;
 }
 
-export interface SaveCalificacionRequest {
+export interface SaveCalificacionRequest extends CalificacionMetadata {
   cursadaMateriaId: number;
   c1Nota1?: number | null;
   c1Nota2?: number | null;
@@ -34,11 +49,9 @@ export interface SaveCalificacionRequest {
 }
 
 export const getCalificacionByCursada = async (cursadaMateriaId: number): Promise<Calificacion | null> => {
-  const token = await getToken();
-  const response = await fetch(`${getApiBaseUrl()}/cursadas-materias/${cursadaMateriaId}/calificacion`, {
+  const response = await authenticatedApiRequest(`cursadas-materias/${cursadaMateriaId}/calificacion`, {
     headers: {
       'Content-Type': 'application/json',
-      ...(token && { Authorization: `Bearer ${token}` }),
     },
   });
 

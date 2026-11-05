@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, ScrollView, Alert, Platform, TouchableOpacity, Image, Modal } from 'react-native';
-import { Text, Surface, TextInput, Button, Checkbox, IconButton, Divider, TouchableRipple, ActivityIndicator } from 'react-native-paper';
+import { Text, Surface, TextInput, Button, Checkbox, IconButton, Divider, ActivityIndicator } from 'react-native-paper';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/AppNavigator';
@@ -9,7 +9,8 @@ import * as DocumentPicker from 'expo-document-picker';
 import { createAlumno, getAlumnos } from '../services/alumnoService';
 import { createInscripcion } from '../services/inscripcionService';
 import { getCursos, Curso } from '../services/cursoService';
-import DateTimePicker from '@react-native-community/datetimepicker';
+import AlumnoBirthDateField from '../components/AlumnoBirthDateField';
+import { alumnoDateValue, nullableAlumnoFields } from '../utils/alumnoFields';
 import { getProvincias, getLocalidadesByProvincia } from '../services/geoService';
 import { DocumentoImageAsset, getTiposDocumentoAlumno, TipoDocumentoAlumno, uploadAlumnoDocumento } from '../services/alumnoDocumentoService';
 
@@ -64,7 +65,7 @@ const InscripcionScreen: React.FC = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
-  const [fechaNacimiento, setFechaNacimiento] = useState<Date | null>(null);
+  const [fechaNacimiento, setFechaNacimiento] = useState('');
   const [domicilio, setDomicilio] = useState('');
   const [nacionalidad, setNacionalidad] = useState('');
   const [sexo, setSexo] = useState('');
@@ -93,7 +94,6 @@ const InscripcionScreen: React.FC = () => {
   const [selectedCursoId, setSelectedCursoId] = useState<number | null>(null);
   const [loadingCursos, setLoadingCursos] = useState(false);
   const [showCursoSelector, setShowCursoSelector] = useState(false);
-  const [showDatePicker, setShowDatePicker] = useState(false);
   const [esArgentina, setEsArgentina] = useState(true);
   const [pais, setPais] = useState('');
   const [provinciaId, setProvinciaId] = useState<number | null>(null);
@@ -177,6 +177,7 @@ const InscripcionScreen: React.FC = () => {
   );
 
   const generoOptions = [
+    { label: 'Sin informar', value: '' },
     { label: 'Varón', value: 'Varon' },
     { label: 'Mujer', value: 'Mujer' },
   ];
@@ -218,17 +219,6 @@ const InscripcionScreen: React.FC = () => {
       setLoadingCursos(false);
     }
   };
-  const onChangeDate = (event: any, selectedDate?: Date) => {
-    setShowDatePicker(false);
-
-    if (selectedDate) {
-      setFechaNacimiento(selectedDate);
-    }
-  };
-  const formatInputDate = (date: Date | null) => {
-    if (!date) return '';
-    return date.toISOString().split('T')[0];
-  };
   // Handle data returned from DNICaptureScreen
 
   useFocusEffect(
@@ -242,7 +232,7 @@ const InscripcionScreen: React.FC = () => {
         if (data.apellido) setApellido(data.apellido);
         if (data.nombre) setNombre(data.nombre);
         if (data.sexo) setSexo(data.sexo);
-        if (data.fechaNacimiento) setFechaNacimiento(data.fechaNacimiento);
+        if (data.fechaNacimiento) setFechaNacimiento(alumnoDateValue(data.fechaNacimiento));
       }
     }, [route.params?.scannedData]));
   const handleDNIScan = () => {
@@ -360,7 +350,7 @@ const InscripcionScreen: React.FC = () => {
   };
 
   const submitAlumno = async () => {
-    if (!nombre || !apellido || !dni) {
+    if (!nombre.trim() || !apellido.trim()) {
       setError('Completá los campos obligatorios');
       return;
     }
@@ -373,14 +363,10 @@ const InscripcionScreen: React.FC = () => {
       setLoading(true);
       setError('');
 
-      const formatApiDate = (date: Date) => date.toISOString().split('T')[0];
-
       const createdAlumno = await createAlumno({
-        nombres: nombre,
-        apellidos: apellido,
-        numeroDocumento: dni,
-        fechaNacimiento: fechaNacimiento ? formatApiDate(fechaNacimiento) : undefined,
-        genero: sexo === 'Varon' || sexo === 'Mujer' ? sexo : undefined,
+        nombres: nombre.trim(),
+        apellidos: apellido.trim(),
+        ...nullableAlumnoFields(dni, fechaNacimiento, sexo),
         domicilio,
         datosNacimiento: {
           localidad: esArgentina ? localidadNacimiento : null,
@@ -396,9 +382,9 @@ const InscripcionScreen: React.FC = () => {
       });
 
       let createdAlumnoId = getCreatedAlumnoId(createdAlumno);
-      if (!createdAlumnoId) {
+      if (!createdAlumnoId && dni.trim()) {
         const alumnos = await getAlumnos();
-        const alumnoCreado = alumnos.find((a) => a.numeroDocumento === dni);
+        const alumnoCreado = alumnos.find((a) => a.numeroDocumento === dni.trim());
         createdAlumnoId = alumnoCreado?.id || null;
       }
 
@@ -428,7 +414,7 @@ const InscripcionScreen: React.FC = () => {
   };
 
   const handleSubmit = async () => {
-    if (!nombre || !apellido || !dni) {
+    if (!nombre.trim() || !apellido.trim()) {
       setError('Completá los campos obligatorios');
       return;
     }
@@ -438,8 +424,6 @@ const InscripcionScreen: React.FC = () => {
     }
 
     const missingFields = [
-      !fechaNacimiento && 'fecha de nacimiento',
-      !sexo && 'sexo',
       !domicilio && 'domicilio',
       esArgentina && !selectedProvincia && 'provincia de nacimiento',
       esArgentina && !selectedLocalidad && 'localidad de nacimiento',
@@ -452,12 +436,17 @@ const InscripcionScreen: React.FC = () => {
     ].filter(Boolean) as string[];
 
     if (missingFields.length > 0) {
+      const message = `Faltan cargar datos:\n\n${missingFields.map((f) => `- ${f}`).join('\n')}\n\n¿Desea guardar el alumno igual?`;
+      if (Platform.OS === 'web') {
+        if (window.confirm(message)) await submitAlumno();
+        return;
+      }
       Alert.alert(
         'Atención',
-        `Faltan cargar datos:\n\n${missingFields.map((f) => `- ${f}`).join('\n')}\n\n¿Desea inscribirlo igual?`,
+        message,
         [
           { text: 'Cancelar', style: 'cancel' },
-          { text: 'Inscribir igual', onPress: submitAlumno },
+          { text: 'Guardar igual', onPress: submitAlumno },
         ]
       );
       return;
@@ -477,7 +466,7 @@ const InscripcionScreen: React.FC = () => {
     setNombre(selectedNombre);
     setApellido(selectedApellido);
     setDni(randomDni);
-    setFechaNacimiento(new Date(2000 + Math.floor(Math.random() * 8), Math.floor(Math.random() * 12), Math.floor(1 + Math.random() * 28)));
+    setFechaNacimiento(alumnoDateValue(new Date(2000 + Math.floor(Math.random() * 8), Math.floor(Math.random() * 12), Math.floor(1 + Math.random() * 28))));
     setDomicilio(`Calle ${Math.floor(100 + Math.random() * 900)} N° ${Math.floor(1000 + Math.random() * 9000)}`);
     setNacionalidad('Argentina');
     setSexo(Math.random() > 0.5 ? 'Varon' : 'Mujer');
@@ -517,7 +506,7 @@ const InscripcionScreen: React.FC = () => {
 
             <View style={styles.dniRow}>
               <TextInput
-                label="DNI"
+                label="DNI (opcional)"
                 value={dni}
                 onChangeText={setDni}
                 mode="outlined"
@@ -542,7 +531,7 @@ const InscripcionScreen: React.FC = () => {
             </View>
 
             <TextInput
-              label="Nombre"
+              label="Nombre *"
               value={nombre}
               onChangeText={(value) => setNombre(sanitizeLettersOnly(value))}
               mode="outlined"
@@ -551,7 +540,7 @@ const InscripcionScreen: React.FC = () => {
               activeOutlineColor="#1F5FAF"
             />
             <TextInput
-              label="Apellido"
+              label="Apellido *"
               value={apellido}
               onChangeText={(value) => setApellido(sanitizeLettersOnly(value))}
               mode="outlined"
@@ -559,44 +548,7 @@ const InscripcionScreen: React.FC = () => {
               outlineColor="#E0E0E0"
               activeOutlineColor="#1F5FAF"
             />
-            <View style={{ marginBottom: 16 }}>
-              <Text>Fecha de nacimiento</Text>
-
-              {Platform.OS === 'web' ? (
-                <input
-                  type="date"
-                  value={formatInputDate(fechaNacimiento)}
-                  max={formatInputDate(new Date())}
-                  onChange={(event) => {
-                    const value = event.currentTarget.value;
-                    setFechaNacimiento(value ? new Date(`${value}T00:00:00`) : null);
-                  }}
-                  style={styles.webDateInput as any}
-                />
-              ) : (
-                <>
-                  <TouchableRipple onPress={() => setShowDatePicker(true)}>
-                    <View style={styles.dateSelector}>
-                      <Text>
-                        {fechaNacimiento
-                          ? fechaNacimiento.toLocaleDateString()
-                          : 'Seleccionar fecha'}
-                      </Text>
-                    </View>
-                  </TouchableRipple>
-
-                  {showDatePicker && (
-                    <DateTimePicker
-                      value={fechaNacimiento || new Date()}
-                      mode="date"
-                      display="default"
-                      onChange={onChangeDate}
-                      maximumDate={new Date()}
-                    />
-                  )}
-                </>
-              )}
-            </View>
+            <AlumnoBirthDateField value={fechaNacimiento} onChange={setFechaNacimiento} />
             <TextInput
               label="Domicilio"
               value={domicilio}
@@ -1198,6 +1150,8 @@ const styles = StyleSheet.create({
   },
   sexoRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
     marginBottom: 16,
   },
   sexoOption: {

@@ -5,7 +5,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
 import type { RootStackParamList } from '../navigation/AppNavigator';
-import { resetPasswordWithCode, validatePasswordResetCode } from '../services/authService';
+import { requestPasswordReset, resetPasswordWithCode, validatePasswordResetCode } from '../services/authService';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'ResetPassword'>;
 type ScreenRouteProp = RouteProp<RootStackParamList, 'ResetPassword'>;
@@ -21,8 +21,10 @@ const ResetPasswordScreen: React.FC = () => {
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [codeValidated, setCodeValidated] = useState(false);
+  const [info, setInfo] = useState('');
 
   const handleValidateCode = async () => {
+    if (saving || codeValidated || successMessage) return;
     if (!/^\d{6}$/.test(code.trim())) {
       setError('Ingresá el código de 6 dígitos');
       return;
@@ -41,6 +43,7 @@ const ResetPasswordScreen: React.FC = () => {
   };
 
   const handleSave = async () => {
+    if (saving || !codeValidated || successMessage) return;
     if (newPassword.length < 6) {
       setError('La nueva contraseña debe tener al menos 6 caracteres');
       return;
@@ -56,11 +59,33 @@ const ResetPasswordScreen: React.FC = () => {
     try {
       await resetPasswordWithCode(route.params.email, code.trim(), newPassword);
       setSuccessMessage('Contraseña actualizada. Ya podés iniciar sesión con tu nueva contraseña.');
-      setTimeout(() => {
-        navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
-      }, 1200);
+      setCode('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setCodeValidated(false);
+      setVisible(false);
+      setInfo('');
     } catch (err: any) {
       setError(err?.message || 'No se pudo actualizar la contraseña');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleResend = async () => {
+    if (saving || successMessage) return;
+    setSaving(true);
+    setError('');
+    try {
+      await requestPasswordReset(route.params.email);
+      setCode('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setCodeValidated(false);
+      setVisible(false);
+      setInfo('Si el correo esta registrado y activo, recibiras un nuevo codigo. El codigo anterior ya no es valido.');
+    } catch (err: any) {
+      setError(err?.message || 'No se pudo reenviar el codigo');
     } finally {
       setSaving(false);
     }
@@ -74,86 +99,113 @@ const ResetPasswordScreen: React.FC = () => {
           <Text variant="headlineSmall" style={styles.title}>
             Nueva contraseña
           </Text>
-          <Text style={styles.description}>
-            {codeValidated
-              ? 'Código validado. Definí tu nueva contraseña.'
-              : `Ingresá el código de reactivación enviado a ${route.params.email}`}
-          </Text>
-          {!codeValidated ? (
+          {successMessage ? (
             <>
-              <TextInput
-                label="Código de reactivación"
-                value={code}
-                onChangeText={(text) => {
-                  setCode(text.replace(/\D/g, '').slice(0, 6));
-                  setError('');
-                }}
-                mode="outlined"
-                keyboardType="numeric"
-                maxLength={6}
-                style={styles.input}
-                outlineColor="#E0E0E0"
-                activeOutlineColor="#1F5FAF"
-              />
-              {error ? <Text style={styles.errorText}>{error}</Text> : null}
-              <Button mode="contained" onPress={handleValidateCode} loading={saving} disabled={saving} style={styles.button}>
-                Validar código
+              <Text accessibilityRole="alert" style={styles.successMessage}>{successMessage}</Text>
+              <Button mode="contained" style={styles.button} onPress={() => navigation.reset({ index: 0, routes: [{ name: 'Login' }] })}>
+                Iniciar sesion
               </Button>
             </>
           ) : (
             <>
-              <View style={styles.passwordContainer}>
-                <TextInput
-                  label="Nueva contraseña"
-                  value={newPassword}
-                  onChangeText={(text) => {
-                    setNewPassword(text);
+              <Text style={styles.description}>
+                {codeValidated
+                  ? 'Código validado. Definí tu nueva contraseña.'
+                  : 'Si el correo esta registrado y activo, recibiras un codigo de acceso unico de 6 digitos. Vence en 15 minutos y permite hasta 5 intentos. Solicita un codigo nuevo: las antiguas claves temporales ya no son validas.'}
+              </Text>
+              {info ? <Text accessibilityRole="alert" style={styles.description}>{info}</Text> : null}
+              {error ? <Text accessibilityRole="alert" style={styles.errorText}>{error}</Text> : null}
+              {!codeValidated ? (
+                <>
+                  <TextInput
+                    label="Codigo de acceso unico"
+                    value={code}
+                    onChangeText={(text) => {
+                      setCode(text.replace(/\D/g, '').slice(0, 6));
+                      setError('');
+                    }}
+                    mode="outlined"
+                    keyboardType="numeric"
+                    maxLength={6}
+                    textContentType="oneTimeCode"
+                    autoComplete="one-time-code"
+                    disabled={saving}
+                    style={styles.input}
+                    outlineColor="#E0E0E0"
+                    activeOutlineColor="#1F5FAF"
+                  />
+                  <Button mode="contained" onPress={handleValidateCode} loading={saving} disabled={saving} style={styles.button}>
+                    Validar código
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <View style={styles.passwordContainer}>
+                    <TextInput
+                      label="Nueva contraseña"
+                      value={newPassword}
+                      onChangeText={(text) => {
+                        setNewPassword(text);
+                        setError('');
+                      }}
+                      mode="outlined"
+                      secureTextEntry={!visible}
+                      disabled={saving}
+                      autoCorrect={false}
+                      autoCapitalize="none"
+                      autoComplete="off"
+                      textContentType="none"
+                      importantForAutofill="no"
+                      style={styles.passwordInput}
+                      outlineColor="#E0E0E0"
+                      activeOutlineColor="#1F5FAF"
+                    />
+                    <IconButton
+                      icon={visible ? 'eye-off' : 'eye'}
+                      size={20}
+                      disabled={saving}
+                      onPress={() => setVisible(!visible)}
+                      style={styles.eyeButton}
+                      iconColor="#6B6B6B"
+                    />
+                  </View>
+                  <TextInput
+                    label="Confirmar nueva contraseña"
+                    value={confirmPassword}
+                    onChangeText={(text) => {
+                      setConfirmPassword(text);
+                      setError('');
+                    }}
+                    mode="outlined"
+                    secureTextEntry={!visible}
+                    disabled={saving}
+                    autoCorrect={false}
+                    autoCapitalize="none"
+                    autoComplete="off"
+                    textContentType="none"
+                    importantForAutofill="no"
+                    style={styles.input}
+                    outlineColor="#E0E0E0"
+                    activeOutlineColor="#1F5FAF"
+                  />
+                  <Button mode="contained" onPress={handleSave} loading={saving} disabled={saving} style={styles.button}>
+                    Guardar contraseña
+                  </Button>
+                  <Button disabled={saving} onPress={() => {
+                    if (saving) return;
+                    setCodeValidated(false);
+                    setCode('');
+                    setNewPassword('');
+                    setConfirmPassword('');
+                    setVisible(false);
                     setError('');
-                  }}
-                  mode="outlined"
-                  secureTextEntry={!visible}
-                  autoComplete="off"
-                  textContentType="none"
-                  importantForAutofill="no"
-                  style={styles.passwordInput}
-                  outlineColor="#E0E0E0"
-                  activeOutlineColor="#1F5FAF"
-                  {...(Platform.OS === 'web'
-                    ? ({ autoCorrect: false, autoCapitalize: 'none', nativeID: 'new-password-no-autofill' } as any)
-                    : {})}
-                />
-                <IconButton
-                  icon={visible ? 'eye-off' : 'eye'}
-                  size={20}
-                  onPress={() => setVisible(!visible)}
-                  style={styles.eyeButton}
-                  iconColor="#6B6B6B"
-                />
-              </View>
-              <TextInput
-                label="Confirmar nueva contraseña"
-                value={confirmPassword}
-                onChangeText={(text) => {
-                  setConfirmPassword(text);
-                  setError('');
-                }}
-                mode="outlined"
-                secureTextEntry={!visible}
-                autoComplete="off"
-                textContentType="none"
-                importantForAutofill="no"
-                style={styles.input}
-                outlineColor="#E0E0E0"
-                activeOutlineColor="#1F5FAF"
-                {...(Platform.OS === 'web'
-                  ? ({ autoCorrect: false, autoCapitalize: 'none', nativeID: 'confirm-password-no-autofill' } as any)
-                  : {})}
-              />
-              {error ? <Text style={styles.errorText}>{error}</Text> : null}
-              {successMessage ? <Text style={styles.successMessage}>{successMessage}</Text> : null}
-              <Button mode="contained" onPress={handleSave} loading={saving} disabled={saving} style={styles.button}>
-                Guardar contraseña
-              </Button>
+                    setInfo('');
+                  }}>
+                    Usar otro codigo
+                  </Button>
+                </>
+              )}
+              <Button disabled={saving} onPress={handleResend}>Reenviar codigo</Button>
             </>
           )}
         </Surface>
