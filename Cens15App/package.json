@@ -9,8 +9,8 @@
     "dev:prod-api": "env-cmd -f .env.prod-api -- expo start --lan",
     "web:local-api": "env-cmd -f .env.local-api -- expo start --web",
     "web:prod-api": "env-cmd -f .env.prod-api -- expo start --web",
-    "build:web:prod": "env-cmd -f .env.production -- expo export --platform web --clear",
-    "build:web:intranet": "env-cmd -f .env.intranet -- expo export --platform web --clear",
+    "build:web:prod": "env-cmd -f .env.production -- expo export --platform web --clear && node scripts/prepare-web.cjs",
+    "build:web:intranet": "env-cmd -f .env.intranet -- expo export --platform web --clear && node scripts/prepare-web.cjs",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
@@ -18,7 +18,8 @@
     "test:env": "node --test tests/env.test.cjs",
     "test:access": "node --test tests/apiHealth.test.cjs tests/register.test.cjs tests/resetPassword.test.cjs",
     "test:session": "node --test tests/sessionExpiry.test.cjs",
-    "test:calificaciones": "node --experimental-strip-types --test tests/calificaciones.test.cjs tests/gradingScreens.test.cjs"
+    "test:calificaciones": "node --experimental-strip-types --test tests/calificaciones.test.cjs tests/gradingScreens.test.cjs",
+    "test:alumnos": "node --experimental-strip-types --test tests/alumnosListado.test.cjs"
   },
   "dependencies": {
     "@expo/dom-webview": "~58.0.2",
@@ -34,6 +35,7 @@
     "expo-camera": "~58.0.14",
     "expo-constants": "~58.0.15",
     "expo-document-picker": "~58.0.4",
+    "expo-font": "~58.0.12",
     "expo-image-picker": "~58.0.10",
     "expo-local-authentication": "~58.0.2",
     "expo-print": "~58.0.8",

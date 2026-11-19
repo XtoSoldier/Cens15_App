@@ -35,9 +35,15 @@ export interface AlumnoInscripcion {
   curso?: any;
 }
 
-export const getAlumnos = async (): Promise<Alumno[]> => {
+export const getAlumnos = async (search?: string, filters: { cursoId?: number; anio?: number } = {}): Promise<Alumno[]> => {
+  const query = search?.trim();
+  if (query !== undefined && query.length < 3) return [];
   try {
-    return await apiFetch('Alumnos');
+    const params: string[] = [];
+    if (query !== undefined) params.push(`search=${encodeURIComponent(query)}`);
+    if (filters.cursoId !== undefined) params.push(`cursoId=${filters.cursoId}`);
+    if (filters.anio !== undefined) params.push(`anio=${filters.anio}`);
+    return await apiFetch(`Alumnos${params.length ? `?${params.join('&')}` : ''}`);
   } catch (error: any) {
     console.error('Error al obtener alumnos:', error);
     throw error;

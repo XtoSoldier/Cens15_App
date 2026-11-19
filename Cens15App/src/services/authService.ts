@@ -1,5 +1,5 @@
 import { apiFetch } from './api';
-import { saveToken, saveUserId, saveUserProfile, getUserIdFromToken } from '../utils/storage';
+import { saveToken, saveUserId, saveUserProfile, getUserIdFromToken, getToken, getSavedProfile, expireSessionCredential } from '../utils/storage';
 import { isSessionTokenUsable } from '../utils/session';
 
 interface LoginResponse {
@@ -56,10 +56,20 @@ export const requestInitialAccess = async (email: string) => {
 };
 
 export const changePassword = async (currentPassword: string, newPassword: string) => {
-  return apiFetch('auth/change-password', {
+  const token = await getToken();
+  const { userEmail } = await getSavedProfile();
+  if (!token || !userEmail) throw new Error('Ingrese nuevamente para cambiar la contrasena');
+  await apiFetch('auth/change-password', {
     method: 'POST',
     body: JSON.stringify({ currentPassword, newPassword }),
   });
+  // Changing the password revokes the old credential, including this device's token.
+  try {
+    return await login(userEmail, newPassword);
+  } catch (error) {
+    await expireSessionCredential(token);
+    throw error;
+  }
 };
 
 export const requestPasswordReset = async (email: string) => {

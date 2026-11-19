@@ -1,5 +1,5 @@
-import React, { useCallback, useMemo, useState } from 'react';
-import { View, StyleSheet, ScrollView, Platform } from 'react-native';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
+import { View, StyleSheet, ScrollView, Platform, useWindowDimensions } from 'react-native';
 import { Text, Surface, TextInput, IconButton, TouchableRipple, ActivityIndicator } from 'react-native-paper';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -17,6 +17,8 @@ interface AlumnoListadoItem {
   curso: string;
   anexo: string;
   orientacion: string;
+  anio: string;
+  inscripciones: InscripcionListado[];
   sexo: string;
   fechaNacimiento?: string | null;
   domicilio?: string | null;
@@ -31,21 +33,28 @@ interface AlumnoListadoItem {
   raw: Alumno;
 }
 
-const getCurrentInscripcion = (alumno: Alumno) => {
-  const inscripciones = alumno.inscripciones || [];
-  return inscripciones.find((i) => i?.estado === 'Activa') || inscripciones[0] || null;
+interface InscripcionListado {
+  cursoId: string;
+  curso: string;
+  anexo: string;
+  orientacion: string;
+  anio: string;
+  activa: boolean;
+  fecha: string;
+  id: string;
+}
+
+const text = (value: unknown): string => typeof value === 'string' || typeof value === 'number' ? String(value).trim() : '';
+
+const getYear = (inscripcion: any) => {
+  const value = text(inscripcion?.anio ?? inscripcion?.Anio);
+  return /^\d{4}$/.test(value) && Number(value) > 0 ? value : '';
 };
 
 const getCursoText = (inscripcion: any) => {
   const curso = inscripcion?.curso || inscripcion?.Curso;
-  if (typeof curso === 'string') return curso;
-  if (inscripcion?.cursoNombre || inscripcion?.CursoNombre || inscripcion?.division || inscripcion?.Division) {
-    return `${inscripcion?.cursoNombre || inscripcion?.CursoNombre || ''} ${inscripcion?.division || inscripcion?.Division || ''}`.trim();
-  }
-  if (!curso) return '';
-
-  const cursoNombre = curso.curso || curso.Curso || '';
-  const division = curso.division || curso.Division || '';
+  const cursoNombre = text(inscripcion?.cursoNombre || inscripcion?.CursoNombre || (typeof curso === 'string' ? curso : curso?.curso || curso?.Curso));
+  const division = text(inscripcion?.division || inscripcion?.Division || curso?.division || curso?.Division);
   return `${cursoNombre} ${division}`.trim();
 };
 
@@ -68,17 +77,13 @@ const getOrientacionText = (inscripcion: any) => {
 };
 
 const getCursoIdFromInscripcion = (inscripcion: any) => {
-  return inscripcion?.cursoId || inscripcion?.CursoId || inscripcion?.id_curso || inscripcion?.IdCurso || null;
+  return inscripcion?.cursoId || inscripcion?.CursoId || inscripcion?.id_curso || inscripcion?.IdCurso || inscripcion?.curso?.id || inscripcion?.Curso?.Id || null;
 };
 
 const resolveCursoFromInscripcion = (inscripcion: any, cursos: Curso[]) => {
   const cursoObject = inscripcion?.curso || inscripcion?.Curso;
-  if (cursoObject && typeof cursoObject !== 'string') return cursoObject;
-
   const cursoId = getCursoIdFromInscripcion(inscripcion);
-  if (!cursoId) return null;
-
-  return cursos.find((curso) => curso.id === cursoId) || null;
+  return cursos.find((curso) => String(curso.id) === String(cursoId)) || (cursoObject && typeof cursoObject === 'object' ? cursoObject : null);
 };
 
 const getAnexoResolvedText = (inscripcion: any, cursos: Curso[]) => {
@@ -96,16 +101,38 @@ const normalizeAlumno = (alumno: Alumno, cursos: Curso[], inscripcionesOverride?
     ...alumno,
     inscripciones: inscripcionesOverride || alumno.inscripciones || [],
   };
-  const inscripcion = getCurrentInscripcion(alumnoConInscripciones);
+  // Sort a normalized copy, never the API arrays. Latest year wins, then active status/date/id.
+  const inscripciones: InscripcionListado[] = alumnoConInscripciones.inscripciones
+    .filter((i) => i && typeof i === 'object' && !Array.isArray(i))
+    .map((i) => {
+      const curso = resolveCursoFromInscripcion(i, cursos);
+      return {
+        cursoId: text(getCursoIdFromInscripcion(i)),
+        curso: getCursoText({ ...i, curso: i.curso || i.Curso || curso,
+          division: i.division || i.Division || curso?.division || curso?.Division }),
+        anexo: text(getAnexoResolvedText(i, cursos)),
+        orientacion: text(getOrientacionResolvedText(i, cursos)),
+        anio: getYear(i),
+        activa: (i.estado || i.Estado) === 'Activa',
+        fecha: text(i.fechaInscripcion || i.FechaInscripcion),
+        id: text(i.id || i.Id),
+      };
+    })
+    .sort((a, b) => b.anio.localeCompare(a.anio) || Number(b.activa) - Number(a.activa) ||
+      b.fecha.localeCompare(a.fecha) || b.id.localeCompare(a.id, undefined, { numeric: true }) ||
+      JSON.stringify(a).localeCompare(JSON.stringify(b)));
+  const inscripcion = inscripciones[0];
 
   return {
     id: alumno.id,
-    nombre: alumno.nombres || '',
-    apellido: alumno.apellidos || '',
-    dni: alumno.numeroDocumento || '',
-    curso: getCursoText(inscripcion),
-    anexo: getAnexoResolvedText(inscripcion, cursos),
-    orientacion: getOrientacionResolvedText(inscripcion, cursos),
+    nombre: text(alumno.nombres),
+    apellido: text(alumno.apellidos),
+    dni: text(alumno.numeroDocumento),
+    curso: inscripcion?.curso || '',
+    anexo: inscripcion?.anexo || '',
+    orientacion: inscripcion?.orientacion || '',
+    anio: inscripcion?.anio || '',
+    inscripciones,
     sexo: alumno.genero || '',
     fechaNacimiento: alumno.fechaNacimiento,
     domicilio: alumno.domicilio,
@@ -123,90 +150,159 @@ const normalizeAlumno = (alumno: Alumno, cursos: Curso[], inscripcionesOverride?
 
 const uniqueValues = (values: string[]) => Array.from(new Set(values.filter(Boolean))).sort((a, b) => a.localeCompare(b));
 const webListStyle = Platform.OS === 'web'
-  ? ({ maxHeight: 'calc(100vh - 220px)', overflowY: 'auto' } as any)
+  ? ({ minHeight: 0, overflowY: 'auto' } as any)
   : null;
 
 const AlumnosListadoScreen: React.FC = () => {
   const navigation = useNavigation<AlumnosListadoNavigationProp>();
+  const { width } = useWindowDimensions();
+  const showCourseButtons = width >= 768;
   const [alumnos, setAlumnos] = useState<AlumnoListadoItem[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [showFilters, setShowFilters] = useState(false);
+  const [loadAll, setLoadAll] = useState(false);
+  const [showFilters, setShowFilters] = useState(true);
   const [selectedCurso, setSelectedCurso] = useState<string | null>(null);
-  const [selectedAnexo, setSelectedAnexo] = useState<string | null>(null);
-  const [selectedOrientacion, setSelectedOrientacion] = useState<string | null>(null);
-  const [filterType, setFilterType] = useState<'curso' | 'anexo' | 'orientacion' | null>(null);
+  const [selectedYear, setSelectedYear] = useState<string | null>(null);
+  const [filterType, setFilterType] = useState<'curso' | 'anio' | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [courseCatalog, setCourseCatalog] = useState<Curso[]>([]);
+  const [loadingCursos, setLoadingCursos] = useState(false);
+  const [cursosError, setCursosError] = useState('');
+  const cursosRequest = useRef<Promise<Curso[]> | null>(null);
+  const cursosVersion = useRef(0);
+  const requestVersion = useRef(0);
+  const currentYear = String(new Date().getFullYear());
+  const requestedSearch = !loadAll && searchQuery.trim().length >= 3 ? searchQuery.trim() : undefined;
+  const requestedCurso = !loadAll && selectedCurso ? Number(selectedCurso) : undefined;
+  const requestedYear = requestedCurso !== undefined && selectedYear ? Number(selectedYear) : undefined;
+  const canLoad = loadAll || !!selectedCurso || searchQuery.trim().length >= 3;
+
+  const fetchCursos = useCallback(() => {
+    const version = ++cursosVersion.current;
+    setLoadingCursos(true);
+    setCursosError('');
+    const request = getCursos();
+    cursosRequest.current = request;
+    void request.then(data => {
+      if (version === cursosVersion.current) setCourseCatalog(data);
+    }).catch(err => {
+      if (version === cursosVersion.current) setCursosError(err?.message || 'No se pudieron cargar los cursos');
+    }).finally(() => {
+      if (version === cursosVersion.current) setLoadingCursos(false);
+    });
+    return request;
+  }, []);
+
+  useFocusEffect(useCallback(() => {
+    void fetchCursos();
+    return () => { cursosVersion.current++; };
+  }, [fetchCursos]));
 
   const fetchAlumnos = useCallback(async () => {
+    if (!canLoad) return;
+    const version = ++requestVersion.current;
     try {
       setLoading(true);
       setError('');
-      const [data, cursosData] = await Promise.all([getAlumnos(), getCursos()]);
+      const [data, cursosData] = await Promise.all([
+        getAlumnos(requestedSearch, { cursoId: requestedCurso, anio: requestedYear }),
+        cursosRequest.current || fetchCursos(),
+      ]);
+      if (version !== requestVersion.current) return;
       const alumnosConInscripciones = await Promise.all(
         data.map(async (alumno) => {
           try {
             const inscripciones = await getInscripcionesByAlumno(alumno.id);
+            if (!Array.isArray(inscripciones)) throw new Error('Historial no disponible');
             return normalizeAlumno(alumno, cursosData, inscripciones);
           } catch {
-            return normalizeAlumno(alumno, cursosData);
+            throw new Error('No se pudo cargar el historial de inscripciones. Reintentá para obtener un listado completo.');
           }
         })
       );
-      setAlumnos(alumnosConInscripciones);
+      if (version === requestVersion.current) {
+        setAlumnos(Array.from(new Map(alumnosConInscripciones.map((alumno) => [alumno.id, alumno])).values()));
+      }
     } catch (err: any) {
-      setError(err?.message || 'No se pudo cargar el listado de alumnos');
+      if (version === requestVersion.current) setError(err?.message || 'No se pudo cargar el listado de alumnos');
     } finally {
-      setLoading(false);
+      if (version === requestVersion.current) setLoading(false);
     }
-  }, []);
+  }, [requestedSearch, requestedCurso, requestedYear, canLoad, fetchCursos]);
 
   useFocusEffect(
     useCallback(() => {
-      fetchAlumnos();
-    }, [fetchAlumnos])
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      setAlumnos([]);
+      setError('');
+      setLoading(canLoad);
+      if (canLoad) {
+        if (loadAll || requestedSearch === undefined) void fetchAlumnos();
+        else timer = setTimeout(() => { void fetchAlumnos(); }, 300);
+      }
+      return () => { clearTimeout(timer); requestVersion.current++; };
+    }, [fetchAlumnos, canLoad, loadAll, requestedSearch])
   );
 
-  const cursos = useMemo(() => uniqueValues(alumnos.map((a) => a.curso)), [alumnos]);
-  const anexos = useMemo(() => uniqueValues(alumnos.map((a) => a.anexo)), [alumnos]);
-  const orientaciones = useMemo(() => uniqueValues(alumnos.map((a) => a.orientacion)), [alumnos]);
+  const handleSearchChange = (value: string) => {
+    const nextSearch = value.trim().length >= 3 ? value.trim() : undefined;
+    if (!loadAll && nextSearch !== requestedSearch) {
+      requestVersion.current++;
+      setAlumnos([]);
+      setError('');
+      setLoading(!!selectedCurso || value.trim().length >= 3);
+    }
+    setSearchQuery(value);
+  };
 
-  const filteredAlumnos = alumnos.filter((alumno) => {
-    const query = searchQuery.trim().toLowerCase();
-    const matchesSearch = !query ||
-      alumno.nombre.toLowerCase().includes(query) ||
-      alumno.apellido.toLowerCase().includes(query) ||
-      alumno.dni.includes(query);
+  const inscripciones = useMemo(() => alumnos.flatMap((a) => a.inscripciones), [alumnos]);
+  const cursos = useMemo(() => {
+    return courseCatalog.map(curso => ({ value: String(curso.id), label: `${curso.curso} ${curso.division}`.trim() || 'Curso' }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [courseCatalog]);
+  const years = useMemo(() => uniqueValues([currentYear, selectedYear || '', ...inscripciones.map((i) => i.anio)]).reverse(), [inscripciones, currentYear, selectedYear]);
+  const selectedCursoLabel = cursos.find((curso) => curso.value === selectedCurso)?.label || (selectedCurso ? 'Curso no disponible' : null);
 
-    const matchesCurso = !selectedCurso || alumno.curso === selectedCurso;
-    const matchesAnexo = !selectedAnexo || alumno.anexo === selectedAnexo;
-    const matchesOrientacion = !selectedOrientacion || alumno.orientacion === selectedOrientacion;
+  const filteredAlumnos = alumnos.flatMap((alumno) => {
+    const terms = loadAll || searchQuery.trim().length >= 3 ? searchQuery.trim().toLowerCase().split(/\s+/) : [];
+    const searchable = `${alumno.nombre} ${alumno.apellido} ${alumno.dni}`.toLowerCase();
+    const matchesSearch = terms.every((term) => searchable.includes(term));
 
-    return matchesSearch && matchesCurso && matchesAnexo && matchesOrientacion;
+    if (!matchesSearch) return [];
+    const inscripcion = alumno.inscripciones.find((i) =>
+      (!selectedCurso || i.cursoId === selectedCurso) &&
+      (!selectedYear || i.anio === selectedYear));
+    if (!inscripcion && (selectedCurso || selectedYear)) return [];
+    return [{ ...alumno, curso: inscripcion?.curso || '', anexo: inscripcion?.anexo || '',
+      orientacion: inscripcion?.orientacion || '', anio: inscripcion?.anio || '' }];
   });
 
   const clearFilters = () => {
     setSelectedCurso(null);
-    setSelectedAnexo(null);
-    setSelectedOrientacion(null);
+    setSelectedYear(null);
     setFilterType(null);
   };
 
   const getFilterData = () => {
     switch (filterType) {
       case 'curso': return cursos;
-      case 'anexo': return anexos;
-      case 'orientacion': return orientaciones;
+      case 'anio': return years.map((value) => ({ value, label: value }));
       default: return [];
     }
   };
 
-  const handleFilterSelect = (value: string) => {
+  const handleFilterSelect = (value: string | null) => {
     switch (filterType) {
-      case 'curso': setSelectedCurso(value); break;
-      case 'anexo': setSelectedAnexo(value); break;
-      case 'orientacion': setSelectedOrientacion(value); break;
+      case 'curso': selectCurso(value); break;
+      case 'anio': setSelectedYear(value); break;
     }
+    setFilterType(null);
+  };
+
+  const selectCurso = (value: string | null) => {
+    setSelectedCurso(value);
+    if (value && !selectedYear) setSelectedYear(currentYear);
     setFilterType(null);
   };
 
@@ -218,7 +314,7 @@ const AlumnosListadoScreen: React.FC = () => {
             <TextInput
               label="Buscar alumno"
               value={searchQuery}
-              onChangeText={setSearchQuery}
+              onChangeText={handleSearchChange}
               mode="outlined"
               style={styles.searchInput}
               outlineColor="#E0E0E0"
@@ -231,11 +327,13 @@ const AlumnosListadoScreen: React.FC = () => {
             size={22}
             iconColor="#6B6B6B"
             onPress={fetchAlumnos}
-            disabled={loading}
+            disabled={loading || !canLoad}
             style={styles.iconButton}
           />
           <IconButton
             icon="filter"
+            accessibilityLabel={showFilters ? 'Ocultar filtros' : 'Mostrar filtros'}
+            accessibilityState={{ expanded: showFilters }}
             size={24}
             iconColor={showFilters ? '#1F5FAF' : '#6B6B6B'}
             onPress={() => {
@@ -246,75 +344,120 @@ const AlumnosListadoScreen: React.FC = () => {
           />
         </View>
 
+        <View style={styles.loadOptions}>
+          <Text style={styles.searchHelp}>Buscá por nombre, apellido o DNI (mínimo 3 caracteres).</Text>
+          <TouchableRipple
+            accessibilityRole="button"
+            accessibilityLabel="Traer todos"
+            style={styles.clearButton}
+            onPress={() => {
+              setSearchQuery('');
+              clearFilters();
+              if (loadAll) void fetchAlumnos();
+              else setLoadAll(true);
+            }}
+          >
+            <Text style={styles.clearButtonText}>Traer todos</Text>
+          </TouchableRipple>
+        </View>
+
         {showFilters && (
           <View style={styles.filtersDropdown}>
             <View style={styles.filterRow}>
-              <TouchableRipple
+              {showCourseButtons ? <>
+                <Text style={styles.filterOptionText}>Cursos:</Text>
+                <TouchableRipple
+                  accessibilityRole="button" accessibilityLabel="Curso: Todos"
+                  accessibilityState={{ selected: selectedCurso === null }}
+                  style={[styles.filterOption, selectedCurso === null && styles.filterOptionActive]}
+                  onPress={() => selectCurso(null)}>
+                  <Text style={[styles.filterOptionText, selectedCurso === null && styles.selectedCourseText]}>Todos</Text>
+                </TouchableRipple>
+                {cursos.map((curso) => <TouchableRipple key={curso.value}
+                  accessibilityRole="button" accessibilityLabel={`Curso: ${curso.label}`}
+                  accessibilityState={{ selected: selectedCurso === curso.value }}
+                  style={[styles.filterOption, selectedCurso === curso.value && styles.filterOptionActive]}
+                  onPress={() => selectCurso(curso.value)}>
+                  <Text style={[styles.filterOptionText, selectedCurso === curso.value && styles.selectedCourseText]}>{curso.label}</Text>
+                </TouchableRipple>)}
+              </> : <TouchableRipple
                 style={[styles.filterOption, selectedCurso && styles.filterOptionActive]}
                 onPress={() => setFilterType(filterType === 'curso' ? null : 'curso')}
               >
-                <Text style={styles.filterOptionText}>Curso: {selectedCurso || 'Todos'}</Text>
-              </TouchableRipple>
+                <Text style={styles.filterOptionText}>Curso: {selectedCursoLabel || 'Todos'}</Text>
+              </TouchableRipple>}
               <TouchableRipple
-                style={[styles.filterOption, selectedAnexo && styles.filterOptionActive]}
-                onPress={() => setFilterType(filterType === 'anexo' ? null : 'anexo')}
+                style={[styles.filterOption, selectedYear && styles.filterOptionActive]}
+                onPress={() => setFilterType(filterType === 'anio' ? null : 'anio')}
               >
-                <Text style={styles.filterOptionText}>Anexo: {selectedAnexo || 'Todos'}</Text>
+                <Text style={styles.filterOptionText}>Año de inscripción: {selectedYear || 'Todos'}</Text>
               </TouchableRipple>
-              <TouchableRipple
-                style={[styles.filterOption, selectedOrientacion && styles.filterOptionActive]}
-                onPress={() => setFilterType(filterType === 'orientacion' ? null : 'orientacion')}
-              >
-                <Text style={styles.filterOptionText}>Orientación: {selectedOrientacion || 'Todas'}</Text>
-              </TouchableRipple>
+              {(selectedCurso || selectedYear) && (
+                <TouchableRipple onPress={clearFilters} style={styles.clearButton}
+                  accessibilityRole="button" accessibilityLabel="Limpiar todos los filtros">
+                  <Text style={styles.clearButtonText}>Limpiar filtros</Text>
+                </TouchableRipple>
+              )}
             </View>
 
-            {filterType && (
+            {loadingCursos && <Text style={styles.emptyFilterText}>Cargando cursos...</Text>}
+            {cursosError ? <View>
+              <Text style={styles.errorText}>{cursosError}</Text>
+              <TouchableRipple onPress={() => { void fetchCursos(); }} style={styles.clearButton}>
+                <Text style={styles.clearButtonText}>Reintentar cursos</Text>
+              </TouchableRipple>
+            </View> : null}
+
+            {filterType && (filterType !== 'curso' || !showCourseButtons) && (
               <View style={styles.filterList}>
                 <Text style={styles.filterListTitle}>
-                  {filterType === 'curso' ? 'Cursos' : filterType === 'anexo' ? 'Anexos' : 'Orientaciones'}
+                  {filterType === 'curso' ? 'Cursos' : 'Años de inscripción'}
                 </Text>
-                {getFilterData().length === 0 ? (
-                  <Text style={styles.emptyFilterText}>No hay opciones disponibles</Text>
-                ) : (
-                  getFilterData().map((item) => (
-                    <TouchableRipple key={item} style={styles.filterItem} onPress={() => handleFilterSelect(item)}>
-                      <Text style={styles.filterItemText}>{item}</Text>
-                    </TouchableRipple>
-                  ))
-                )}
+                <ScrollView style={styles.filterOptions} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+                  <TouchableRipple style={styles.filterItem} onPress={() => handleFilterSelect(null)}
+                    accessibilityRole="button" accessibilityLabel={`${filterType === 'curso' ? 'Curso' : 'Año de inscripción'}: Todos`}>
+                    <Text style={styles.filterItemText}>Todos</Text>
+                  </TouchableRipple>
+                  {getFilterData().length === 0 ? (
+                    <Text style={styles.emptyFilterText}>No hay opciones disponibles</Text>
+                  ) : (
+                    getFilterData().map((item) => (
+                      <TouchableRipple key={item.value} style={styles.filterItem} onPress={() => handleFilterSelect(item.value)}>
+                        <Text style={styles.filterItemText}>{item.label}</Text>
+                      </TouchableRipple>
+                    ))
+                  )}
+                </ScrollView>
               </View>
             )}
 
-            {(selectedCurso || selectedAnexo || selectedOrientacion) && (
-              <TouchableRipple onPress={clearFilters} style={styles.clearButton}>
-                <Text style={styles.clearButtonText}>Limpiar filtros</Text>
-              </TouchableRipple>
-            )}
           </View>
         )}
 
-        {(selectedCurso || selectedAnexo || selectedOrientacion) && (
+        {!showFilters && (selectedCurso || selectedYear) && (
           <View style={styles.activeFilters}>
             {selectedCurso && (
               <TouchableRipple onPress={() => setSelectedCurso(null)} style={styles.filterChip}>
-                <Text style={styles.filterChipText}>Curso: {selectedCurso} x</Text>
+                <Text style={styles.filterChipText}>Curso: {selectedCursoLabel} x</Text>
               </TouchableRipple>
             )}
-            {selectedAnexo && (
-              <TouchableRipple onPress={() => setSelectedAnexo(null)} style={styles.filterChip}>
-                <Text style={styles.filterChipText}>Anexo: {selectedAnexo} x</Text>
-              </TouchableRipple>
-            )}
-            {selectedOrientacion && (
-              <TouchableRipple onPress={() => setSelectedOrientacion(null)} style={styles.filterChip}>
-                <Text style={styles.filterChipText}>Orientación: {selectedOrientacion} x</Text>
+            {selectedYear && (
+              <TouchableRipple onPress={() => setSelectedYear(null)} style={styles.filterChip}>
+                <Text style={styles.filterChipText}>Año de inscripción: {selectedYear} x</Text>
               </TouchableRipple>
             )}
           </View>
         )}
 
-        {loading ? (
+        <Text style={styles.resultCount} accessibilityLiveRegion="polite">
+          {!canLoad ? 'Alumnos encontrados: sin consultar' : loading ? 'Alumnos encontrados: cargando...' : error ? 'Alumnos encontrados: no disponible' : `Alumnos encontrados: ${filteredAlumnos.length}`}
+        </Text>
+
+        {!canLoad ? (
+          <View style={styles.stateContainer}>
+            <Text style={styles.stateText}>Escribí al menos 3 caracteres para buscar, elegí un curso o seleccioná "Traer todos".</Text>
+          </View>
+        ) : loading ? (
           <View style={styles.stateContainer}>
             <ActivityIndicator color="#1F5FAF" />
             <Text style={styles.stateText}>Cargando alumnos...</Text>
@@ -347,7 +490,10 @@ const AlumnosListadoScreen: React.FC = () => {
                   <Text style={styles.alumnoName}>{alumno.apellido}, {alumno.nombre}</Text>
                   <Text style={styles.alumnoDNI}>DNI: {alumno.dni || 'Sin cargar'}</Text>
                   <Text style={styles.alumnoDetails}>
-                    {[alumno.curso, alumno.anexo, alumno.orientacion].filter(Boolean).join(' - ') || 'Sin inscripción activa'}
+                    {[alumno.curso, alumno.anexo, alumno.orientacion].filter(Boolean).join(' - ') || 'Sin inscripción'}
+                  </Text>
+                  <Text style={styles.alumnoDetails}>
+                    {alumno.anio ? `Año de inscripción: ${alumno.anio}` : alumno.inscripciones.length ? 'Sin año informado' : 'Sin inscripción'}
                   </Text>
                 </View>
               </TouchableRipple>
@@ -366,6 +512,7 @@ const styles = StyleSheet.create({
   },
   surface: {
     flex: 1,
+    minHeight: 0,
     padding: 16,
     width: '100%',
     backgroundColor: '#FFFFFF',
@@ -373,10 +520,23 @@ const styles = StyleSheet.create({
   searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 8,
   },
   searchContainer: {
     flex: 1,
+  },
+  loadOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginBottom: 8,
+  },
+  searchHelp: {
+    flexShrink: 1,
+    fontSize: 12,
+    color: '#6B6B6B',
   },
   searchInput: {
     backgroundColor: '#FFFFFF',
@@ -387,19 +547,20 @@ const styles = StyleSheet.create({
   },
   filtersDropdown: {
     backgroundColor: '#F7F9FC',
-    padding: 12,
+    padding: 8,
     borderRadius: 8,
-    marginBottom: 16,
+    marginBottom: 8,
     borderWidth: 1,
     borderColor: '#E0E0E0',
   },
   filterRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    alignItems: 'center',
     gap: 8,
-    marginBottom: 12,
   },
   filterOption: {
+    maxWidth: '100%',
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 8,
@@ -415,11 +576,18 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#2B2B2B',
   },
+  selectedCourseText: {
+    color: '#1F5FAF',
+    fontWeight: '600',
+  },
   filterList: {
     marginTop: 8,
     paddingTop: 8,
     borderTopWidth: 1,
     borderTopColor: '#E0E0E0',
+  },
+  filterOptions: {
+    maxHeight: 180,
   },
   filterListTitle: {
     fontSize: 14,
@@ -443,20 +611,21 @@ const styles = StyleSheet.create({
   clearButton: {
     padding: 8,
     alignItems: 'center',
-    marginTop: 8,
+    justifyContent: 'center',
   },
   clearButtonText: {
     fontSize: 12,
-    color: '#F28C28',
+    color: '#1F5FAF',
     fontWeight: '500',
   },
   activeFilters: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    marginBottom: 16,
+    marginBottom: 8,
     gap: 8,
   },
   filterChip: {
+    maxWidth: '100%',
     backgroundColor: '#E6F0FA',
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -468,6 +637,7 @@ const styles = StyleSheet.create({
   },
   listContainer: {
     flex: 1,
+    minHeight: 0,
   },
   listContent: {
     paddingBottom: 24,
@@ -491,6 +661,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#6B6B6B',
     marginTop: 2,
+  },
+  resultCount: {
+    fontSize: 12,
+    color: '#6B6B6B',
+    marginBottom: 4,
   },
   stateContainer: {
     flex: 1,

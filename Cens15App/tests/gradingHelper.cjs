@@ -28,11 +28,11 @@ function gradingScreen(name, mocks = {}, props = {}) {
       hooks[index] = deps;
     },
   };
-  const native = Object.fromEntries(['View', 'ScrollView', 'TouchableOpacity', 'Modal', 'TouchableWithoutFeedback', 'ActivityIndicator'].map(x => [x, x]));
+  const native = Object.fromEntries(['View', 'ScrollView', 'KeyboardAvoidingView', 'TouchableOpacity', 'Modal', 'TouchableWithoutFeedback', 'ActivityIndicator'].map(x => [x, x]));
   native.StyleSheet = { create: x => x };
   native.Platform = { OS: 'web' };
   native.Alert = { alert() { throw new Error('Grading must display web-safe errors'); } };
-  const paper = Object.fromEntries(['Text', 'Surface', 'Chip', 'IconButton', 'Button', 'ActivityIndicator', 'Checkbox'].map(x => [x, x]));
+  const paper = Object.fromEntries(['Text', 'TextInput', 'Surface', 'Chip', 'IconButton', 'Button', 'ActivityIndicator', 'Checkbox'].map(x => [x, x]));
   paper.DataTable = Object.assign('DataTable', { Header: 'Header', Title: 'Title', Row: 'Row', Cell: 'Cell' });
   paper.Avatar = { Text: 'Avatar' };
   paper.RadioButton = { Group: 'RadioGroup', Item: 'RadioItem' };
@@ -45,7 +45,8 @@ function gradingScreen(name, mocks = {}, props = {}) {
     const compiled = ts.transpileModule(source, { compilerOptions: {
       module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.React, esModuleInterop: true,
     } }).outputText;
-    vm.runInNewContext(compiled, { exports, console, setTimeout, require(dependency) {
+    const testExports = '\nif (typeof buildBoletinHtml !== "undefined") exports.buildBoletinHtml = buildBoletinHtml;\nif (typeof BoletinPreviewModal !== "undefined") exports.BoletinPreviewModal = BoletinPreviewModal;';
+    vm.runInNewContext(compiled + testExports, { exports, console, setTimeout, require(dependency) {
       if (dependency in mocks) return mocks[dependency];
       if (dependency === 'react') return react;
       if (dependency === 'react-native') return native;
@@ -66,7 +67,8 @@ function gradingScreen(name, mocks = {}, props = {}) {
   }
   const component = load(path.join(__dirname, `../src/${name}`)).default;
   return {
-    render() {
+    render(nextProps) {
+      if (nextProps) props = nextProps;
       cursor = 0;
       const tree = component(props);
       effects.splice(0).forEach(effect => effect());

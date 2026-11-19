@@ -173,7 +173,8 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
   const alumno: any = route.params?.alumno || {} as any;
   const navigation = useNavigation<AlumnoDetalleScreenNavigationProp>();
   const userRole = useAppSelector((state) => state.app.userRole);
-  const normalizedRole = userRole.replace(/\s/g, '').toLowerCase();
+  const normalizedRole = (userRole || '').replace(/\s/g, '').toLowerCase();
+  const isPreceptor = normalizedRole === 'preceptor';
   const canDeleteAlumno = normalizedRole === 'admin' || normalizedRole === 'superadmin';
 
   const [activeTab, setActiveTab] = useState<string>('datos');
@@ -283,6 +284,7 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
   }, [alumno?.id]);
 
   const inscripcionActual = getInscripcionActiva(inscripciones);
+  const anioInscripcionActual = inscripcionActual?.anio ?? inscripcionActual?.Anio;
   const cursoActual = getCursoCompletoLabel(inscripcionActual, cursos, formData.curso, formData.anexo, formData.orientacion) || getCursoText(inscripcionActual) || formData.curso;
   const alumnoNombreTitulo = getAlumnoNombreTitulo(alumno);
 
@@ -293,10 +295,11 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
     { key: 'reinscribir', label: 'Reinscribir alumno', icon: 'reload' },
     { key: 'calificaciones', label: 'Calificaciones', icon: 'clipboard-text' },
     { key: 'constancias', label: 'Constancias', icon: 'certificate' },
-  ];
+  ].filter(tab => !isPreceptor || tab.key !== 'reinscribir');
   const tabsRef = React.useRef<ScrollViewInstance | null>(null);
 
   const handleSave = async () => {
+    if (isPreceptor) return;
     if (!formData.nombre.trim() || !formData.apellido.trim()) {
       Alert.alert('Error', 'Nombre y Apellido son obligatorios');
       return;
@@ -381,6 +384,7 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
   };
 
   const handleReinscribir = async () => {
+    if (isPreceptor) return;
     setReinscribirError('');
     if (!alumno?.id) {
       setReinscribirError('No se pudo identificar al alumno');
@@ -418,7 +422,7 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
   };
 
   const handleDeleteConfirm = async () => {
-    if (!deletingInscripcion) return;
+    if (isPreceptor || !deletingInscripcion) return;
     setDeletingLoading(true);
     setDeleteError('');
     try {
@@ -519,6 +523,7 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
   };
 
   const handleDocumentoUpload = async (tipo: TipoDocumentoAlumno, documento: AlumnoDocumento | null, fromCamera: boolean) => {
+    if (isPreceptor) return;
     try {
       if (fromCamera) {
         const result = await ImagePicker.launchCameraAsync({
@@ -549,7 +554,7 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
   };
 
   const handleDocumentoDelete = (tipo: TipoDocumentoAlumno, documento: AlumnoDocumento | null) => {
-    if (!documento?.id) return;
+    if (isPreceptor || !documento?.id) return;
 
     Alert.alert(
       'Eliminar documentación',
@@ -594,6 +599,13 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
 
   return (
     <View style={styles.container}>
+      <Button icon="arrow-left" mode="text" textColor="#1F5FAF"
+        accessibilityLabel="Volver al listado de alumnos manteniendo los filtros"
+        onPress={() => navigation.popTo('AlumnosListado')}
+        disabled={saving || deletingAlumno || deletingLoading || reinscribirLoading || uploadingDocumentoId !== null}
+        style={styles.backToList}>
+        Volver al listado de alumnos
+      </Button>
       <View style={styles.tabsContainer}>
         <ScrollView
           horizontal
@@ -638,7 +650,7 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
           })}
         </ScrollView>
 
-        {activeTab === 'datos' && (
+        {activeTab === 'datos' && !isPreceptor && (
           <TouchableOpacity
             disabled={saving}
             onPress={() => {
@@ -801,6 +813,13 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
               mode="outlined"
               style={styles.input}
             />
+            <TextInput
+              label="Año de inscripción"
+              value={anioInscripcionActual != null ? String(anioInscripcionActual) : inscripcionActual ? 'Sin año informado' : 'Sin inscripción'}
+              editable={false}
+              mode="outlined"
+              style={styles.input}
+            />
 
             {editMode && (
               <View style={styles.editActions}>
@@ -890,7 +909,7 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
                             ))}
                           </View>
                         )}
-                        <View style={styles.docUploadActions}>
+                        {!isPreceptor && <View style={styles.docUploadActions}>
                           <Button
                             mode={images.length > 0 ? 'outlined' : 'contained'}
                             compact
@@ -925,7 +944,7 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
                               Eliminar
                             </Button>
                           )}
-                        </View>
+                        </View>}
                       </View>
                     </DataTable.Cell>
                   </DataTable.Row>
@@ -961,7 +980,7 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
                     <Text style={styles.histAnioText}>{item?.anio || item?.Anio || '-'}</Text>
                   </DataTable.Cell>
                   <DataTable.Cell style={styles.histColAction}>
-                    <IconButton icon="delete" size={20} iconColor="#C62828" onPress={() => { setDeletingInscripcion(item); setDeleteError(''); }} />
+                    {!isPreceptor && <IconButton icon="delete" size={20} iconColor="#C62828" onPress={() => { setDeletingInscripcion(item); setDeleteError(''); }} />}
                   </DataTable.Cell>
                 </DataTable.Row>
               ))}
@@ -971,7 +990,7 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
             )}
           </View>
         )}
-        {activeTab === 'reinscribir' && (
+        {activeTab === 'reinscribir' && !isPreceptor && (
           <View>
             <Text style={styles.sectionTitle}>Reinscribir Alumno</Text>
 
@@ -1190,7 +1209,7 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
             <Text style={styles.deleteModalText}>
               ¿Eliminar inscripción de "{deletingInscripcion ? (getCursoCompletoLabel(deletingInscripcion, cursos) || getCursoText(deletingInscripcion) || `ID ${deletingInscripcion?.id || ''}`) : ''}"?
             </Text>
-            <Text style={styles.deleteModalSubText}>Se eliminarán también las materias y calificaciones asociadas.</Text>
+            <Text style={styles.deleteModalSubText}>No se puede eliminar una inscripción con cursadas o calificaciones. Primero deben retirarse manualmente, desde la entidad más hija.</Text>
             {deleteError ? <Text style={styles.errorText}>{deleteError}</Text> : null}
             <View style={styles.deleteModalActions}>
               <Button
@@ -1247,6 +1266,7 @@ const AlumnoDetalleScreen: React.FC<Props> = () => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 8 },
+  backToList: { alignSelf: 'flex-start', marginBottom: 8 },
   surface: { padding: 16 },
   input: { marginBottom: 12 },
   inputEditable: {

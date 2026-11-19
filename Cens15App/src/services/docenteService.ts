@@ -1,5 +1,5 @@
 import { apiFetch } from './api';
-import type { CalificacionMetadata } from './calificacionService';
+import type { CalificacionMetadata, EstadoMateria } from './calificacionService';
 
 export interface DocenteMateriaDto {
   materiaId: number;
@@ -22,6 +22,7 @@ export interface DocenteDto {
 
 export interface AlumnoCalificacionSimpleDto extends CalificacionMetadata {
   alumnoId: number;
+  inscripcionId: number;
   alumnoNombre: string;
   cursadaMateriaId: number;
   calificacionId: number | null;
@@ -31,7 +32,7 @@ export interface AlumnoCalificacionSimpleDto extends CalificacionMetadata {
   recuperacionDiciembre: number | null;
   recuperacionMarzo: number | null;
   calificacionFinal: number | null;
-  estado: number;
+  estado: number | EstadoMateria;
 }
 
 export interface DocenteMateriaConAlumnosDto {
@@ -50,11 +51,11 @@ export const getDocentes = async (): Promise<DocenteDto[]> => {
 };
 
 export const getDocenteByUserId = async (userId: string): Promise<DocenteDto | null> => {
-  try {
-    return await apiFetch(`Docentes/por-usuario/${userId}`);
-  } catch {
-    return null;
-  }
+  return await apiFetch(`Docentes/por-usuario/${encodeURIComponent(userId)}`);
+};
+
+export const getMiDocente = async (): Promise<DocenteDto> => {
+  return await apiFetch('Docentes/mi-perfil');
 };
 
 export const getAlumnosParaCalificar = async (docenteId: number): Promise<DocenteMateriaConAlumnosDto[]> => {
@@ -63,4 +64,8 @@ export const getAlumnosParaCalificar = async (docenteId: number): Promise<Docent
 
 export const getMisAlumnosParaCalificar = async (): Promise<DocenteMateriaConAlumnosDto[]> => {
   return await apiFetch('Docentes/mis-alumnos-para-calificar');
+};
+
+export const getMateriasParaCalificar = async (): Promise<DocenteMateriaConAlumnosDto[]> => {
+  return await apiFetch('Docentes/materias-para-calificar');
 };

@@ -6,12 +6,15 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 import { changePassword } from '../services/authService';
+import { useAppDispatch } from '../hooks/useRedux';
+import { setUserToken } from '../slices/appSlice';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'ChangePassword'>;
 type ScreenRouteProp = RouteProp<RootStackParamList, 'ChangePassword'>;
 
 const ChangePasswordScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp>();
+  const dispatch = useAppDispatch();
   const route = useRoute<ScreenRouteProp>();
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -32,7 +35,8 @@ const ChangePasswordScreen: React.FC = () => {
     setSaving(true);
     setError('');
     try {
-      await changePassword(route.params.currentPassword, newPassword);
+      const response = await changePassword(route.params.currentPassword, newPassword);
+      dispatch(setUserToken(response.token));
       Alert.alert('Contraseña actualizada', 'Ya podés usar tu nueva contraseña.');
       navigation.reset({ index: 0, routes: [{ name: 'MainMenu' }] });
     } catch (err: any) {

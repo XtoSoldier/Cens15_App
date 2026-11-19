@@ -32,3 +32,9 @@ export const getCursos = async (): Promise<Curso[]> => {
     throw error;
   }
 };
+
+export const getMisCursosPreceptor = async (): Promise<Curso[]> => {
+  const data = await apiFetch('Preceptores/mis-cursos');
+  if (!Array.isArray(data)) throw new Error('No se pudieron verificar los cursos a cargo.');
+  return data.map(normalizeCurso).filter((curso: Curso) => curso.id > 0);
+};

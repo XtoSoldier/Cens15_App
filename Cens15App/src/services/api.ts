@@ -37,7 +37,11 @@ export const apiFetch = async (
     const text = await response.text();
     let json;
     try { json = text ? JSON.parse(text) : null; } catch { /* Preserve non-JSON HTTP error bodies. */ }
-    throw new Error(json?.message || text || 'Error en la petición');
+    const fallback = response.status === 403 ? 'No tenés permisos para realizar esta operación.'
+      : response.status === 401 ? 'La sesión no es válida. Ingresá nuevamente.'
+      : response.status === 404 ? 'No se encontró el recurso solicitado.'
+      : `Error en la petición (HTTP ${response.status}).`;
+    throw Object.assign(new Error(json?.message || json?.detail || json?.title || text || fallback), { status: response.status });
   }
 
   const text = await response.text();

@@ -30,6 +30,7 @@ import { useAppSelector, useAppDispatch } from '../hooks/useRedux';
 import { logout } from '../slices/appSlice';
 import { clearUserData } from '../utils/storage';
 import { isSessionTokenUsable } from '../utils/session';
+import FullscreenButton from '../components/FullscreenButton';
 
 export type RootStackParamList = {
   Home: undefined;
@@ -92,6 +93,7 @@ function NotificationIcon() {
 function HeaderRight() {
   return (
     <View style={styles.headerRight}>
+      <FullscreenButton />
       <NotificationIcon />
       <LoginStatusIcon />
     </View>
@@ -158,7 +160,7 @@ function LoginStatusIcon() {
           <Divider />
           <Menu.Item
             onPress={handleLogout}
-            title="Bloquear sesión"
+            title="Cerrar sesión"
             leadingIcon="lock"
           />
           <Divider />
@@ -220,7 +222,7 @@ const styles = StyleSheet.create({
 });
 
 function AppNavigator({ initialRouteName = 'Home', expirationVersion = 0 }: {
-  initialRouteName?: 'Home' | 'Login'; expirationVersion?: number;
+  initialRouteName?: 'Home' | 'Login' | 'MainMenu'; expirationVersion?: number;
 }) {
   const { width } = useWindowDimensions();
   const token = useAppSelector((state) => state.app.userToken);

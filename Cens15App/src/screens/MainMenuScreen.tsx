@@ -1,15 +1,12 @@
-import React, { useRef, useState } from 'react';
+import React, { useState } from 'react';
 import {
-  GestureResponderEvent,
   Image,
-  NativeScrollEvent,
-  NativeSyntheticEvent,
   Platform,
   ScrollView,
   StyleSheet,
   View,
 } from 'react-native';
-import { ActivityIndicator, Text, Surface, IconButton, TouchableRipple } from 'react-native-paper';
+import { Text, Surface, IconButton, TouchableRipple } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/AppNavigator';
@@ -17,7 +14,6 @@ import type { RootStackParamList } from '../navigation/AppNavigator';
 type MainMenuNavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
 const GRID_GAP = 12;
-const PULL_THRESHOLD = 64;
 
 interface MenuItem {
   title: string;
@@ -41,11 +37,6 @@ const menuItems: MenuItem[] = [
 const MainMenu: React.FC = () => {
   const navigation = useNavigation<MainMenuNavigationProp>();
   const [gridWidth, setGridWidth] = useState(0);
-  const [pullDistance, setPullDistance] = useState(0);
-  const [refreshing, setRefreshing] = useState(false);
-  const scrollOffset = useRef(0);
-  const touchStartY = useRef<number | null>(null);
-  const pullDistanceRef = useRef(0);
 
   const columns = gridWidth >= 720 ? 4 : gridWidth >= 520 ? 3 : 2;
   const availableCardWidth = gridWidth > 0
@@ -60,46 +51,6 @@ const MainMenu: React.FC = () => {
 
     const route = item.route;
     navigation.navigate(route);
-  };
-
-  const updatePullDistance = (distance: number) => {
-    pullDistanceRef.current = distance;
-    setPullDistance(distance);
-  };
-
-  const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    scrollOffset.current = Math.max(0, event.nativeEvent.contentOffset.y);
-    if (scrollOffset.current > 0) touchStartY.current = null;
-  };
-
-  const handleTouchStart = (event: GestureResponderEvent) => {
-    if (Platform.OS !== 'web' || refreshing || scrollOffset.current > 0) return;
-    touchStartY.current = event.nativeEvent.pageY;
-  };
-
-  const handleTouchMove = (event: GestureResponderEvent) => {
-    if (Platform.OS !== 'web' || touchStartY.current === null || scrollOffset.current > 0) return;
-    const distance = Math.max(0, event.nativeEvent.pageY - touchStartY.current);
-    updatePullDistance(Math.min(96, distance * 0.5));
-  };
-
-  const finishPull = () => {
-    if (Platform.OS !== 'web') return;
-
-    touchStartY.current = null;
-    if (pullDistanceRef.current < PULL_THRESHOLD) {
-      updatePullDistance(0);
-      return;
-    }
-
-    setRefreshing(true);
-    updatePullDistance(PULL_THRESHOLD);
-    window.setTimeout(() => window.location.reload(), 250);
-  };
-
-  const cancelPull = () => {
-    touchStartY.current = null;
-    if (!refreshing) updatePullDistance(0);
   };
 
   return (
@@ -118,12 +69,6 @@ const MainMenu: React.FC = () => {
             style={[styles.menuScroll, Platform.OS === 'web' && styles.webMenuScroll]}
             contentContainerStyle={styles.menuScrollContent}
             showsVerticalScrollIndicator
-            onScroll={handleScroll}
-            scrollEventThrottle={16}
-            onTouchStart={handleTouchStart}
-            onTouchMove={handleTouchMove}
-            onTouchEnd={finishPull}
-            onTouchCancel={cancelPull}
           >
             <View
               style={styles.grid}
@@ -154,17 +99,6 @@ const MainMenu: React.FC = () => {
               ))}
             </View>
           </ScrollView>
-          {(pullDistance > 0 || refreshing) && (
-            <View pointerEvents="none" style={styles.pullIndicator}>
-              {refreshing ? (
-                <ActivityIndicator size="small" color="#1F5FAF" />
-              ) : (
-                <Text style={styles.pullIndicatorText}>
-                  {pullDistance >= PULL_THRESHOLD ? 'Soltá para actualizar' : 'Deslizá para actualizar'}
-                </Text>
-              )}
-            </View>
-          )}
         </View>
       </Surface>
     </View>
@@ -256,27 +190,6 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: '#9E9E9E',
     marginTop: 4,
-  },
-  pullIndicator: {
-    position: 'absolute',
-    top: 8,
-    alignSelf: 'center',
-    minHeight: 36,
-    paddingHorizontal: 16,
-    borderRadius: 18,
-    backgroundColor: '#FFFFFF',
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 4,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.16,
-    shadowRadius: 4,
-  },
-  pullIndicatorText: {
-    color: '#1F5FAF',
-    fontSize: 12,
-    fontWeight: '600',
   },
 });
 

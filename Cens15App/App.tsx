@@ -10,13 +10,14 @@ import { useAppDispatch } from './src/hooks/useRedux';
 import { logout, setUserToken, updateProfile } from './src/slices/appSlice';
 import { getSavedProfile, getToken, isBiometricLoginEnabled } from './src/utils/storage';
 import EnvironmentRibbon from './src/components/EnvironmentRibbon';
+import WebPullToRefresh from './src/components/WebPullToRefresh';
 import { isSessionTokenUsable, onSessionExpired, watchSessionExpiry } from './src/utils/session';
 import { observeSessionForeground } from './src/utils/sessionLifecycle';
 
 const InitApp = () => {
   const dispatch = useAppDispatch();
   const [ready, setReady] = useState(false);
-  const [initialRoute, setInitialRoute] = useState<'Home' | 'Login'>('Home');
+  const [initialRoute, setInitialRoute] = useState<'Home' | 'Login' | 'MainMenu'>('Home');
   const [expirationVersion, setExpirationVersion] = useState(0);
 
   useEffect(() => {
@@ -38,6 +39,7 @@ const InitApp = () => {
         if (biometricLoginEnabled) {
           setInitialRoute('Login');
         } else {
+          setInitialRoute('MainMenu');
           dispatch(setUserToken(token));
           if (profile && (profile.userId || profile.userName)) {
             dispatch(
@@ -75,6 +77,7 @@ export default function App() {
           <View style={{ flex: 1 }}>
             <InitApp />
             <EnvironmentRibbon />
+            <WebPullToRefresh />
           </View>
         </SafeAreaProvider>
       </PaperProvider>

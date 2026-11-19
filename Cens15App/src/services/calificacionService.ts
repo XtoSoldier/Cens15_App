@@ -1,10 +1,12 @@
 import { apiFetch, authenticatedApiRequest } from './api';
 
-export type EstadoMateria = 'EnCurso' | 'Aprobado' | 'RecuperaPrimerCuatrimestre' | 'RecuperaSegundoCuatrimestre' | 'RecuperaAmbos';
+export type EstadoMateria = 'EnCurso' | 'Aprobado' | 'RecuperaPrimerCuatrimestre' | 'RecuperaSegundoCuatrimestre' | 'RecuperaAmbos' | 'AprobadoPorEquivalencia';
 export type CondicionNota = 'Numerica' | 'Ausente' | 'SinCalificar';
-export type RecuperacionExcepcional = Exclude<EstadoMateria, 'EnCurso' | 'Aprobado'>;
+export type RecuperacionExcepcional = Exclude<EstadoMateria, 'EnCurso' | 'Aprobado' | 'AprobadoPorEquivalencia'>;
 
 export interface CalificacionMetadata {
+  disposicionEquivalencia?: string | null;
+  desdePase?: boolean;
   c1Nota1?: number | null;
   c1Nota2?: number | null;
   c1Nota3?: number | null;

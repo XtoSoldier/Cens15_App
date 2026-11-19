@@ -2,15 +2,15 @@ import React, { useEffect, useRef, useState } from 'react';
 import { View, StyleSheet, ScrollView, TouchableOpacity, Modal, TouchableWithoutFeedback, ActivityIndicator } from 'react-native';
 import { Text, Surface, DataTable, Chip, IconButton, Avatar, Button } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
-import { useAppSelector, useAppDispatch } from '../hooks/useRedux';
-import { updateProfile } from '../slices/appSlice';
-import { getDocenteByUserId, getMisAlumnosParaCalificar, DocenteMateriaConAlumnosDto, AlumnoCalificacionSimpleDto } from '../services/docenteService';
+import { getMiDocente, getMisAlumnosParaCalificar, getMateriasParaCalificar, DocenteMateriaConAlumnosDto, AlumnoCalificacionSimpleDto } from '../services/docenteService';
+import { prepareCursadaParaCalificar } from '../services/cursadaMateriaService';
+import { useAppSelector } from '../hooks/useRedux';
 import { createCalificacion, updateCalificacion } from '../services/calificacionService';
-import { getUserIdFromToken } from '../utils/storage';
-import { Grado, GradeValues, GradeField, GRADE_OPTIONS, GRADE_LEGEND, gradeLabel, normalizeEstado, calculateGrades, editGrade, gradesFromCalificacion, buildSaveRequest, suggestedRecovery, isLegacy } from '../utils/calificaciones';
+import { Grado, GradeValues, GradeField, GRADE_OPTIONS, GRADE_LEGEND, gradeLabel, normalizeEstado, calculateGrades, editGrade, gradesFromCalificacion, buildSaveRequest, suggestedRecovery, isLegacy, changeGradeOrigin } from '../utils/calificaciones';
 import RecuperacionChoiceModal from '../components/RecuperacionChoiceModal';
+import CalificacionOriginModal, { PaseInfoModal } from '../components/CalificacionOriginModal';
 
-type Situacion = 'R1' | 'R2' | 'R1+R2' | 'AP' | 'APE' | '';
+type Situacion = 'R1' | 'R2' | 'R1+R2' | 'AP' | 'A/E' | '';
 
 const SITUACIONES: { value: Situacion; label: string }[] = [
   { value: '', label: '-' },
@@ -18,12 +18,14 @@ const SITUACIONES: { value: Situacion; label: string }[] = [
   { value: 'R2', label: 'Recupera 2do' },
   { value: 'R1+R2', label: 'Recupera 1ro y 2do' },
   { value: 'AP', label: 'Aprobado' },
-  { value: 'APE', label: 'Aprobado x Equivalencia' },
 ];
 
 const NOTAS_POSIBLES = GRADE_OPTIONS;
 
 interface AlumnoRow extends GradeValues {
+  rowKey: string;
+  materiaId: number;
+  inscripcionId: number;
   source: AlumnoCalificacionSimpleDto;
   alumnoId: number;
   alumnoNombre: string;
@@ -41,6 +43,7 @@ interface AlumnoRow extends GradeValues {
 
 interface MateriaCurso {
   materiaId: number;
+  cursoId: number;
   materiaNombre: string;
   cursoLabel: string;
   anio: number;
@@ -50,6 +53,7 @@ interface MateriaCurso {
 function situacionFromEstado(estado?: GradeValues['estado'] | number): Situacion {
   switch (normalizeEstado(estado)) {
     case 'Aprobado': return 'AP';
+    case 'AprobadoPorEquivalencia': return 'A/E';
     case 'RecuperaPrimerCuatrimestre': return 'R1';
     case 'RecuperaSegundoCuatrimestre': return 'R2';
     case 'RecuperaAmbos': return 'R1+R2';
@@ -59,8 +63,7 @@ function situacionFromEstado(estado?: GradeValues['estado'] | number): Situacion
 
 function estadoFromSituacion(sit: Situacion): number {
   switch (sit) {
-    case 'AP':
-    case 'APE': return 1;
+    case 'AP': return 1;
     case 'R1': return 2;
     case 'R2': return 3;
     case 'R1+R2': return 4;
@@ -89,7 +92,7 @@ function getNotaColor(nota: Grado) {
 function getSituacionColor(sit: Situacion) {
   switch (sit) {
     case 'AP': return '#2E7D32';
-    case 'APE': return '#00897B';
+    case 'A/E': return '#00897B';
     case 'R1':
     case 'R2':
     case 'R1+R2': return '#E65100';
@@ -183,7 +186,6 @@ function SituacionPickerModal({
                     styles.sitChip,
                     currentSituacion === sit.value && styles.sitChipSelected,
                     sit.value === 'AP' && styles.sitChipGreen,
-                    sit.value === 'APE' && styles.sitChipTeal,
                     sit.value.startsWith('R') && styles.sitChipOrange,
                   ]}
                   textStyle={styles.sitChipText}
@@ -205,16 +207,26 @@ const FIELD_LABELS: Record<string, string> = {
 
 const DocenteCalificarScreen: React.FC = () => {
   const navigation = useNavigation();
-  const dispatch = useAppDispatch();
-  const { userId, userName, userLastname } = useAppSelector((s) => s.app);
+  const profileRole = useAppSelector(state => state.app.userRole || '').trim().toLowerCase();
+  const isSuperAdmin = profileRole === 'superadmin';
 
   const [materias, setMaterias] = useState<MateriaCurso[]>([]);
   const [selectedMateriaIdx, setSelectedMateriaIdx] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [docenteNombre, setDocenteNombre] = useState('');
-  const savingRows = useRef(new Set<number>());
+  const savingRows = useRef(new Set<string>());
+  const requestVersion = useRef(0);
+  const bulkPending = useRef(false);
+  const [bulkVisible, setBulkVisible] = useState(false);
+  const [bulkField, setBulkField] = useState<GradeField>('c1');
+  const [bulkGrade, setBulkGrade] = useState<Grado>('');
+  const [bulkConfirm, setBulkConfirm] = useState(false);
+  const [bulkSaving, setBulkSaving] = useState(false);
+  const [bulkResult, setBulkResult] = useState('');
   const [pendingRecovery, setPendingRecovery] = useState<{ materiaIdx: number; alumnoIdx: number; draft: AlumnoRow } | null>(null);
+  const [originRow, setOriginRow] = useState<{ materiaIdx: number; alumnoIdx: number } | null>(null);
+  const [paseInfo, setPaseInfo] = useState(false);
 
   const [gradePicker, setGradePicker] = useState<{ visible: boolean; alumnoIdx: number; field: string; value: string }>({
     visible: false,
@@ -230,39 +242,44 @@ const DocenteCalificarScreen: React.FC = () => {
   });
 
   useEffect(() => {
-    loadData();
-  }, []);
+    void loadData();
+    return () => { requestVersion.current++; };
+  }, [profileRole]);
 
   const loadData = async () => {
+    const version = ++requestVersion.current;
     setLoading(true);
     setError('');
+    setMaterias([]);
+    setSelectedMateriaIdx(null);
+    setBulkResult('');
+    setBulkVisible(false);
+    setOriginRow(null);
+    setPendingRecovery(null);
+    setGradePicker(current => ({ ...current, visible: false }));
     try {
-      let uid = userId;
-      if (!uid) {
-        uid = (await getUserIdFromToken()) || '';
-        if (uid) {
-          dispatch(updateProfile({ userId: uid }));
-        }
+      if (profileRole === 'preceptor') throw new Error('Tu perfil permite consultar calificaciones en los datos del alumno, pero no modificarlas.');
+      let data: DocenteMateriaConAlumnosDto[];
+      if (isSuperAdmin) {
+        setDocenteNombre('SuperAdmin');
+        data = await getMateriasParaCalificar();
+      } else {
+        const docente = await getMiDocente();
+        if (version !== requestVersion.current) return;
+        setDocenteNombre(`${docente.apellidos}, ${docente.nombres}`);
+        data = await getMisAlumnosParaCalificar();
       }
-      if (!uid) {
-        setError('No hay usuario logueado');
-        setLoading(false);
-        return;
-      }
-      const docente = await getDocenteByUserId(uid);
-      if (!docente) {
-        setError('El usuario no está vinculado a ningún docente');
-        setLoading(false);
-        return;
-      }
-      setDocenteNombre(`${docente.apellidos}, ${docente.nombres}`);
-      const data = await getMisAlumnosParaCalificar();
+      if (version !== requestVersion.current) return;
       const mapped: MateriaCurso[] = data.map((m: DocenteMateriaConAlumnosDto) => ({
         materiaId: m.materiaId,
+        cursoId: m.cursoId,
         materiaNombre: m.materiaNombre,
         cursoLabel: m.cursoLabel || `${m.cursoNombre} ${m.division}`,
         anio: m.anio,
         alumnos: m.alumnos.map((a: AlumnoCalificacionSimpleDto) => ({
+          rowKey: `${m.materiaId}:${m.cursoId}:${m.anio}:${a.inscripcionId || `cursada-${a.cursadaMateriaId}`}`,
+          materiaId: m.materiaId,
+          inscripcionId: a.inscripcionId,
           alumnoId: a.alumnoId,
           alumnoNombre: a.alumnoNombre,
           cursadaMateriaId: a.cursadaMateriaId,
@@ -275,9 +292,9 @@ const DocenteCalificarScreen: React.FC = () => {
       }));
       setMaterias(mapped);
     } catch (err: any) {
-      setError(err?.message || 'Error al cargar datos');
+      if (version === requestVersion.current) setError(err?.message || 'Error al cargar datos');
     } finally {
-      setLoading(false);
+      if (version === requestVersion.current) setLoading(false);
     }
   };
 
@@ -286,29 +303,39 @@ const DocenteCalificarScreen: React.FC = () => {
   const pendingGrade = gradePicker.visible && selectedMateria ? selectedMateria.alumnos[gradePicker.alumnoIdx][gradePicker.field as keyof AlumnoRow] as Grado : '';
 
   const saveAlumno = async (draft: AlumnoRow) => {
-    const id = draft.cursadaMateriaId;
-    if (savingRows.current.has(id)) return;
-    savingRows.current.add(id);
-    const patchRow = (patch: Partial<AlumnoRow>) => setMaterias(current => current.map(m => ({ ...m, alumnos: m.alumnos.map(a => a.cursadaMateriaId === id ? { ...a, ...patch } : a) })));
+    const key = draft.rowKey;
+    if (savingRows.current.has(key)) return false;
+    savingRows.current.add(key);
+    const patchRow = (patch: Partial<AlumnoRow>) => setMaterias(current => current.map(m => ({ ...m, alumnos: m.alumnos.map(a => a.rowKey === key ? { ...a, ...patch } : a) })));
     patchRow({ saving: true });
     setError('');
     try {
+      let id = draft.cursadaMateriaId;
+      if (!id) {
+        if (!draft.inscripcionId) throw new Error('No se pudo identificar la inscripción del alumno. Volvé a cargar la planilla.');
+        const cursada = await prepareCursadaParaCalificar({ inscripcionId: draft.inscripcionId, materiaId: draft.materiaId });
+        if (!cursada?.id) throw new Error('No se pudo preparar la cursada del alumno.');
+        id = cursada.id;
+        patchRow({ cursadaMateriaId: id });
+      }
       const body = buildSaveRequest(id, draft, draft.source);
       let calificacionId = draft.calificacionId;
       if (calificacionId) await updateCalificacion(calificacionId, body);
       else calificacionId = (await createCalificacion(body)).id;
-      patchRow({ ...draft, calificacionId, saving: false });
+      patchRow({ ...draft, cursadaMateriaId: id, source: { ...draft.source, ...body }, calificacionId, saving: false });
+      return true;
     } catch (err: any) {
       patchRow({ saving: false });
       setError(err?.message || 'Error al guardar la nota');
+      return false;
     } finally {
-      savingRows.current.delete(id);
+      savingRows.current.delete(key);
     }
   };
 
   const doSaveGrade = (materiaIdx: number, alumnoIdx: number, field: string, g: Grado) => {
     const alumno = materias[materiaIdx].alumnos[alumnoIdx];
-    if (savingRows.current.has(alumno.cursadaMateriaId) || pendingRecovery) return;
+    if (bulkPending.current || savingRows.current.has(alumno.rowKey) || pendingRecovery || alumno.estado === 'AprobadoPorEquivalencia') return;
     const manual = field === 'anual' || field === 'final';
     if (manual && (!isLegacy(alumno) || g === 'A' || g === 'S/C')) return;
     const result = manual ? calculateGrades({ ...alumno, [field]: g }) : editGrade(alumno, field as GradeField, g);
@@ -322,7 +349,7 @@ const DocenteCalificarScreen: React.FC = () => {
 
   const doSaveSituacion = (materiaIdx: number, alumnoIdx: number, sit: Situacion) => {
     const alumno = materias[materiaIdx].alumnos[alumnoIdx];
-    if (!isLegacy(alumno) || pendingRecovery) return;
+    if (bulkPending.current || !isLegacy(alumno) || pendingRecovery || savingRows.current.has(alumno.rowKey) || alumno.estado === 'AprobadoPorEquivalencia' || !SITUACIONES.some(option => option.value === sit)) return;
     void saveAlumno({ ...alumno, situacion: sit, estado: mapEstadoToApi(estadoFromSituacion(sit)) });
   };
 
@@ -344,11 +371,38 @@ const DocenteCalificarScreen: React.FC = () => {
     }
   };
 
+  const applyBulkGrade = async () => {
+    if (!selectedMateria || !bulkConfirm || !bulkGrade || bulkPending.current || savingRows.current.size || pendingRecovery) return;
+    bulkPending.current = true;
+    setBulkSaving(true);
+    const version = requestVersion.current;
+    let saved = 0, failed = 0, equivalencias = 0, individual = 0;
+    try {
+      for (const alumno of selectedMateria.alumnos) {
+        if (version !== requestVersion.current) break;
+        if (alumno.estado === 'AprobadoPorEquivalencia') { equivalencias++; continue; }
+        try {
+          const result = editGrade(alumno, bulkField, bulkGrade);
+          if (result.needsChoice) { individual++; continue; }
+          const draft = { ...alumno, ...result, situacion: situacionFromEstado(result.estado) };
+          if (await saveAlumno(draft)) saved++;
+          else failed++;
+        } catch { failed++; }
+      }
+      setBulkResult(`Actualizados: ${saved}. Sin guardar: ${failed}. Equivalencias omitidas: ${equivalencias}. Requieren elección individual: ${individual}.`);
+      setError(failed ? 'Algunas notas no se guardaron. Revisá las filas y reintentá las que correspondan.' : '');
+      setBulkVisible(false);
+    } finally {
+      bulkPending.current = false;
+      setBulkSaving(false);
+    }
+  };
+
   if (loading) {
     return (
       <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
         <ActivityIndicator size="large" color="#1F5FAF" />
-        <Text style={{ marginTop: 12, color: '#6B6B6B' }}>Cargando datos del docente...</Text>
+        <Text style={{ marginTop: 12, color: '#6B6B6B' }}>Cargando planillas de calificaciones...</Text>
       </View>
     );
   }
@@ -369,18 +423,25 @@ const DocenteCalificarScreen: React.FC = () => {
         <View style={styles.materiaHeader}>
           <TouchableOpacity
             style={styles.materiaHeaderBack}
-            onPress={() => setSelectedMateriaIdx(null)}
+            disabled={bulkSaving}
+            onPress={() => { setSelectedMateriaIdx(null); setBulkResult(''); }}
           >
             <IconButton icon="arrow-left" size={20} iconColor="#1F5FAF" style={styles.backBtnIcon} />
             <Text style={styles.materiaHeaderBackText}>Volver</Text>
           </TouchableOpacity>
           <View style={styles.materiaHeaderInfo}>
             <Text style={styles.materiaHeaderTitulo}>{selectedMateria.materiaNombre}</Text>
-            <Text style={styles.materiaHeaderCurso}>{selectedMateria.cursoLabel} — {selectedMateria.alumnos.length} alumnos</Text>
+            <Text style={styles.materiaHeaderCurso}>{selectedMateria.cursoLabel} — {selectedMateria.anio} — {selectedMateria.alumnos.length} alumnos</Text>
           </View>
         </View>
 
         {error ? <Text style={styles.saveErrorText}>{error}</Text> : null}
+        {bulkResult ? <Text accessibilityLiveRegion="polite" style={{ padding: 12 }}>{bulkResult}</Text> : null}
+        <Button
+          mode="outlined"
+          disabled={bulkSaving || !!pendingRecovery || savingRows.current.size > 0 || selectedMateria.alumnos.length === 0}
+          onPress={() => { setBulkVisible(true); setBulkGrade(''); setBulkField('c1'); setBulkConfirm(false); setBulkResult(''); }}
+        >Calificar a todos</Button>
         <Text>{GRADE_LEGEND}</Text>
 
         <ScrollView horizontal showsHorizontalScrollIndicator>
@@ -395,14 +456,16 @@ const DocenteCalificarScreen: React.FC = () => {
                   <Text style={styles.headerText}>{col}</Text>
                 </DataTable.Title>
               ))}
+              <DataTable.Title style={styles.colMenu}><Text style={styles.headerText}>Opciones</Text></DataTable.Title>
             </DataTable.Header>
 
             {selectedMateria.alumnos.map((alumno, idx) => (
-              <DataTable.Row key={`${alumno.alumnoId}-${alumno.cursadaMateriaId}`} style={styles.row}>
+              <DataTable.Row key={alumno.rowKey} style={styles.row}>
                 <DataTable.Cell style={styles.colNombre}>
                   <View style={styles.alumnoCell}>
                     <Avatar.Text size={26} label={alumno.alumnoNombre[0].toUpperCase()} style={styles.alumnoAvatar} />
                     <Text style={styles.alumnoNombre} numberOfLines={1}>{alumno.alumnoNombre}</Text>
+                    {alumno.desdePase && <IconButton icon="alert-circle-outline" size={16} accessibilityLabel={`Información de pase: ${alumno.alumnoNombre}, ${selectedMateria.materiaNombre}`} onPress={() => setPaseInfo(true)} />}
                     {alumno.saving && <ActivityIndicator size="small" color="#1F5FAF" style={{ marginLeft: 4 }} />}
                   </View>
                 </DataTable.Cell>
@@ -410,7 +473,7 @@ const DocenteCalificarScreen: React.FC = () => {
                   <DataTable.Cell key={field} style={styles.colNota}>
                     <TouchableOpacity
                       accessibilityLabel={gradeLabel(alumno[field])}
-                      disabled={alumno.saving || pendingRecovery !== null || ((field === 'anual' || field === 'final') && !isLegacy(alumno))}
+                      disabled={bulkSaving || alumno.saving || alumno.estado === 'AprobadoPorEquivalencia' || pendingRecovery !== null || ((field === 'anual' || field === 'final') && !isLegacy(alumno))}
                       onPress={() => setGradePicker({ visible: true, alumnoIdx: idx, field, value: alumno[field] })}
                       style={styles.gradeCell}
                     >
@@ -422,7 +485,7 @@ const DocenteCalificarScreen: React.FC = () => {
                 ))}
                 <DataTable.Cell style={styles.colSit}>
                   <TouchableOpacity
-                    disabled={alumno.saving || pendingRecovery !== null || !isLegacy(alumno)}
+                    disabled={bulkSaving || alumno.saving || alumno.estado === 'AprobadoPorEquivalencia' || pendingRecovery !== null || !isLegacy(alumno)}
                     onPress={() => setSitPicker({ visible: true, alumnoIdx: idx, value: alumno.situacion })}
                     style={styles.sitCell}
                   >
@@ -431,11 +494,42 @@ const DocenteCalificarScreen: React.FC = () => {
                     </Text>
                   </TouchableOpacity>
                 </DataTable.Cell>
+                <DataTable.Cell style={styles.colMenu}><IconButton icon="dots-vertical" size={20} accessibilityLabel={`Origen de calificación: ${alumno.alumnoNombre}, ${selectedMateria.materiaNombre}`} disabled={bulkSaving || alumno.saving || !!pendingRecovery} onPress={() => { setError(''); setOriginRow({ materiaIdx: selectedMateriaIdx!, alumnoIdx: idx }); }} /></DataTable.Cell>
               </DataTable.Row>
             ))}
           </DataTable>
         </ScrollView>
         </ScrollView>
+
+        {bulkVisible && <Modal transparent visible animationType="fade" onRequestClose={() => { if (!bulkPending.current) setBulkVisible(false); }}>
+          <View style={styles.modalOverlay}>
+            <Surface style={[styles.modalContent, { width: '90%', maxWidth: 460, maxHeight: '90%' }]} elevation={3}>
+              <ScrollView>
+                <Text style={styles.modalTitle}>Calificar a todos</Text>
+                <Text>{selectedMateria.materiaNombre} — {selectedMateria.cursoLabel} — {selectedMateria.anio}</Text>
+                <Text>Elegí la columna y la nota. Se reemplazará esa nota en los alumnos de esta planilla. Las equivalencias y los casos que requieran una elección individual se omitirán.</Text>
+                <View style={styles.gradeGrid}>
+                  {(['c1', 'c2', 'diciembre', 'febrero'] as GradeField[]).map(field => <Chip
+                    key={field} selected={bulkField === field} disabled={bulkSaving}
+                    accessibilityLabel={`Columna para todos: ${FIELD_LABELS[field]}`}
+                    onPress={() => { setBulkField(field); setBulkConfirm(false); }}
+                  >{FIELD_LABELS[field]}</Chip>)}
+                </View>
+                <View style={styles.gradeGrid}>
+                  {NOTAS_POSIBLES.map(grade => <Chip key={grade} selected={bulkGrade === grade} disabled={bulkSaving}
+                    accessibilityLabel={`Nota para todos: ${gradeLabel(grade)}`}
+                    onPress={() => { setBulkGrade(grade); setBulkConfirm(false); }}
+                  >{grade}</Chip>)}
+                </View>
+                {bulkConfirm && <Text>Confirmá aplicar {gradeLabel(bulkGrade)} en {FIELD_LABELS[bulkField]} a {selectedMateria.alumnos.length} alumnos. Los cambios guardados no se deshacen al cerrar.</Text>}
+                <Button disabled={bulkSaving} onPress={() => setBulkVisible(false)}>Cancelar</Button>
+                <Button mode="contained" disabled={!bulkGrade || bulkSaving} loading={bulkSaving}
+                  onPress={() => { if (bulkConfirm) void applyBulkGrade(); else setBulkConfirm(true); }}
+                >{bulkConfirm ? 'Confirmar y aplicar' : 'Revisar cambios'}</Button>
+              </ScrollView>
+            </Surface>
+          </View>
+        </Modal>}
 
         <GradePickerModal
           visible={gradePicker.visible}
@@ -445,6 +539,25 @@ const DocenteCalificarScreen: React.FC = () => {
           onClose={() => setGradePicker({ ...gradePicker, visible: false })}
         />
 
+        {paseInfo && <PaseInfoModal onClose={() => setPaseInfo(false)} />}
+        {originRow && <CalificacionOriginModal
+          values={materias[originRow.materiaIdx].alumnos[originRow.alumnoIdx]}
+          context={`${materias[originRow.materiaIdx].alumnos[originRow.alumnoIdx].alumnoNombre}, ${materias[originRow.materiaIdx].materiaNombre}`}
+          pending={materias[originRow.materiaIdx].alumnos[originRow.alumnoIdx].saving}
+          saveError={error}
+          onCancel={() => setOriginRow(null)}
+          onApply={async (origin, disposition) => {
+            const { materiaIdx, alumnoIdx } = originRow;
+            const base = materias[materiaIdx].alumnos[alumnoIdx];
+            if (bulkPending.current || savingRows.current.has(base.rowKey) || pendingRecovery) return;
+            const result = changeGradeOrigin(base, origin, disposition);
+            const draft = { ...base, ...result, situacion: situacionFromEstado(result.estado) };
+            if (result.needsChoice) {
+              setOriginRow(null);
+              setPendingRecovery({ materiaIdx, alumnoIdx, draft });
+            } else if (await saveAlumno(draft)) setOriginRow(null);
+          }}
+        />}
         {pendingRecovery && <RecuperacionChoiceModal
           suggested={suggestedRecovery(pendingRecovery.draft)}
           onCancel={() => setPendingRecovery(null)}
@@ -471,21 +584,21 @@ const DocenteCalificarScreen: React.FC = () => {
       <Surface style={styles.surface} elevation={1}>
         <View style={styles.header}>
           <View style={styles.headerDocente}>
-            <Avatar.Text size={40} label={docenteNombre ? docenteNombre.split(',')[1]?.trim()?.[0] + docenteNombre.split(',')[0]?.[0] : '?'} style={styles.headerAvatar} />
+            <Avatar.Text size={40} label={isSuperAdmin ? 'SA' : docenteNombre ? `${docenteNombre.split(',')[1]?.trim()?.[0] || ''}${docenteNombre[0]}` : '?'} style={styles.headerAvatar} />
             <View style={styles.headerDocenteInfo}>
               <Text style={styles.headerDocenteNombre}>{docenteNombre || 'Docente'}</Text>
-              <Text style={styles.headerDocenteMaterias}>Materias asignadas</Text>
+              <Text style={styles.headerDocenteMaterias}>{isSuperAdmin ? 'Calificaciones por materia, curso y año' : 'Mis materias asignadas'}</Text>
             </View>
           </View>
         </View>
 
         <ScrollView showsVerticalScrollIndicator={false} style={styles.materiasScroll}>
           {materias.length === 0 ? (
-            <Text style={{ textAlign: 'center', color: '#6B6B6B', marginTop: 32 }}>No hay materias asignadas con alumnos inscriptos.</Text>
+            <Text style={{ textAlign: 'center', color: '#6B6B6B', marginTop: 32 }}>{isSuperAdmin ? 'No hay materias cargadas.' : 'No hay materias activas asignadas a tu docente.'}</Text>
           ) : (
             materias.map((mat, idx) => (
               <TouchableOpacity
-                key={`${mat.materiaId}-${mat.cursoLabel}`}
+                key={`${mat.materiaId}-${mat.cursoId}-${mat.anio}`}
                 onPress={() => setSelectedMateriaIdx(idx)}
                 style={styles.materiaCard}
                 activeOpacity={0.7}
@@ -676,6 +789,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 2,
   },
+  colMenu: { minWidth: 64, flex: 0.6, justifyContent: 'center' },
   row: {
     minHeight: 44,
   },

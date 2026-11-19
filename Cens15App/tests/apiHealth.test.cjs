@@ -39,3 +39,40 @@ test('network failures and malformed responses propagate to the status indicator
   await assert.rejects(probe(async () => { throw new Error('network'); })('http://server/api'), /network/);
   await assert.rejects(probe(async () => ({ ok: true, json: async () => { throw new Error('invalid JSON'); } }))('http://server/api'), /invalid JSON/);
 });
+
+test('app status indicator schedules health checks every 60 seconds and clears the interval on unmount', async () => {
+  const effects = [];
+  const intervals = new Map();
+  let calls = 0;
+  const react = {
+    createElement: () => null,
+    useState: value => [value, () => {}],
+    useEffect: effect => effects.push(effect),
+  };
+  const exports = {};
+  const component = fs.readFileSync(path.join(__dirname, '../src/components/EnvironmentRibbon.tsx'), 'utf8');
+  const compiledComponent = ts.transpileModule(component, { compilerOptions: {
+    module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.React, esModuleInterop: true,
+  } }).outputText;
+  vm.runInNewContext(compiledComponent, {
+    exports, AbortController, setTimeout, clearTimeout,
+    setInterval: (callback, delay) => { intervals.set(1, { callback, delay }); return 1; },
+    clearInterval: id => intervals.delete(id),
+    require(name) {
+      if (name === 'react') return react;
+      if (name === 'react-native') return { StyleSheet: { create: x => x }, Linking: {}, View: 'View', Text: 'Text', TouchableOpacity: 'TouchableOpacity' };
+      if (name === '../services/env') return { API_URL: 'https://own.test/api', SHOW_ENV_INDICATOR: true, ENV_LABEL: 'TEST' };
+      if (name === '../services/healthService') return { checkApiHealth: async () => { calls++; return true; } };
+      throw new Error(`Unexpected dependency: ${name}`);
+    },
+  });
+  exports.default();
+  const cleanup = effects[0]();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls, 1, 'initial health check');
+  assert.equal(intervals.get(1).delay, 60000);
+  await intervals.get(1).callback();
+  assert.equal(calls, 2);
+  cleanup();
+  assert.equal(intervals.size, 0);
+});

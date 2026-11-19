@@ -3,7 +3,7 @@ import { Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import env from '../services/env';
 import { checkApiHealth } from '../services/healthService';
 
-const API_CHECK_INTERVAL_MS = 2000;
+const API_CHECK_INTERVAL_MS = 60000;
 const API_CHECK_TIMEOUT_MS = 1500;
 
 const EnvironmentRibbon = () => {

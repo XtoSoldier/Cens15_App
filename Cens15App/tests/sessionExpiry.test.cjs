@@ -158,6 +158,21 @@ test('a delayed old 401 cannot clear a newer login credential', async () => {
   assert.equal(h.session.isSessionTokenUsable(oldToken), false);
 });
 
+test('empty HTTP errors preserve status and explain permission failures instead of a generic request error', async () => {
+  const h = harness();
+  const token = jwt({ exp: 200 });
+  await h.credentials.saveToken(token);
+  for (const [status, message] of [[403, /permisos/], [404, /recurso/], [500, /HTTP 500/]]) {
+    h.setFetch(async () => new Response('', { status }));
+    await assert.rejects(h.load('src/services/api.ts').apiFetch('Docentes/mi-perfil'), error => {
+      assert.equal(error.status, status);
+      assert.match(error.message, message);
+      return true;
+    });
+    assert.equal(await h.credentials.getToken(), token);
+  }
+});
+
 for (const status of [403, 500]) {
   test(`${status} does not expire the credential and preserves non-JSON errors`, async () => {
     const h = harness();
@@ -216,6 +231,90 @@ test('login rejects expired or malformed returned JWT before saving profile', as
     assert.equal(h.values.has('user_name'), false);
   }
 });
+
+test('password change replaces the revoked credential through a fresh password login', async () => {
+  const h = harness();
+  const oldToken = jwt({ exp: 200, sub: 'user', version: 'old' });
+  const newToken = jwt({ exp: 300, sub: 'user', version: 'new' });
+  await h.credentials.saveToken(oldToken);
+  await h.credentials.saveUserProfile({ userEmail: 'user@example.test' });
+  const calls = [];
+  h.setFetch(async (url, options) => {
+    calls.push(url);
+    if (url.endsWith('/change-password')) {
+      assert.equal(options.headers.get('Authorization'), `Bearer ${oldToken}`);
+      return new Response(null, { status: 204 });
+    }
+    assert.equal(options.headers.has('Authorization'), false);
+    assert.equal(JSON.parse(options.body).password, 'new-password');
+    return new Response(JSON.stringify({ token: newToken, userId: 'user' }));
+  });
+  const result = await h.load('src/services/authService.ts').changePassword('old-password', 'new-password');
+  assert.equal(result.token, newToken);
+  assert.equal(await h.credentials.getToken(), newToken);
+  assert.equal(h.session.isSessionTokenUsable(oldToken), false);
+  assert.equal(calls.length, 2);
+});
+
+test('failed password change keeps the existing credential; failed re-login removes the revoked one', async () => {
+  for (const changed of [false, true]) {
+    const h = harness();
+    const token = jwt({ exp: 200 });
+    await h.credentials.saveToken(token);
+    await h.credentials.saveUserProfile({ userEmail: 'user@example.test' });
+    h.setFetch(async (url) => {
+      if (changed && url.endsWith('/change-password')) return new Response(null, { status: 204 });
+      throw new Error('offline');
+    });
+    await assert.rejects(h.load('src/services/authService.ts').changePassword('old-password', 'new-password'), /offline/);
+    assert.equal(await h.credentials.getToken(), changed ? null : token);
+  }
+});
+
+for (const kind of ['valid', 'expired', 'guest', 'locked']) {
+  test(`startup ${kind} chooses the correct route after a mobile browser reload`, async () => {
+    const h = harness();
+    if (kind !== 'guest') h.values.set('user_token', jwt({ exp: kind === 'expired' ? 100 : 200 }));
+    if (kind === 'locked') h.values.set('biometric_login_enabled', 'true');
+    const states = [];
+    const effects = [];
+    let cursor = 0;
+    const react = {
+      createElement: (type, props) => ({ type, props }),
+      useState: (initial) => {
+        const index = cursor++;
+        if (!(index in states)) states[index] = initial;
+        return [states[index], (next) => { states[index] = typeof next === 'function' ? next(states[index]) : next; }];
+      },
+      useEffect: (effect) => { effects.push(effect); },
+    };
+    const exports = {};
+    const filename = path.resolve(__dirname, '../App.tsx');
+    const compiled = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React, esModuleInterop: true },
+    }).outputText;
+    vm.runInNewContext(`${compiled}\nexports.InitApp = InitApp;`, {
+      exports,
+      require: (name) => {
+        if (name === 'react') return react;
+        if (name.endsWith('/utils/storage')) return h.credentials;
+        if (name.endsWith('/utils/session')) return h.session;
+        if (name.endsWith('/utils/sessionLifecycle')) return { observeSessionForeground: () => () => {} };
+        if (name.endsWith('/hooks/useRedux')) return { useAppDispatch: () => () => {} };
+        if (name.endsWith('/slices/appSlice')) return h.load('src/slices/appSlice.ts');
+        return {};
+      },
+    }, { filename });
+    assert.equal(exports.InitApp(), null);
+    const cleanup = effects[0]();
+    for (let i = 0; i < 30; i++) await Promise.resolve();
+    cursor = 0;
+    const result = exports.InitApp();
+    assert.ok(result, 'startup completed');
+    assert.equal(result.props.initialRouteName, kind === 'valid' ? 'MainMenu' : kind === 'guest' ? 'Home' : 'Login');
+    cleanup();
+  });
+}
 
 test('foreground, browser focus and visibility recheck credentials and clean up', async () => {
   const listeners = new Map();

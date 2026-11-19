@@ -7,6 +7,8 @@ export const GRADE_LEGEND = 'A = Ausente (cuenta 0), S/C = Sin Calificar (no pro
 export const gradeLabel = (g: Grado): string => g === 'A' ? 'Ausente (cuenta 0)' : g === 'S/C' ? 'Sin Calificar (no promedia)' : g || 'Pendiente';
 
 export interface GradeValues {
+  disposicionEquivalencia?: string | null;
+  desdePase?: boolean;
   c1: Grado;
   c2: Grado;
   diciembre: Grado;
@@ -25,7 +27,7 @@ export const toGrade = (value?: number | null, condition?: CondicionNota): Grado
 export const toNumber = (g: Grado): number | null => g === 'A' ? 0 : g === '' || g === 'S/C' ? null : Number(g);
 export const conditionFromGrade = (g: Grado): CondicionNota => g === 'A' ? 'Ausente' : g === 'S/C' ? 'SinCalificar' : 'Numerica';
 export const normalizeEstado = (estado?: EstadoMateria | number): EstadoMateria => typeof estado === 'number'
-  ? (['EnCurso', 'Aprobado', 'RecuperaPrimerCuatrimestre', 'RecuperaSegundoCuatrimestre', 'RecuperaAmbos'] as const)[estado] || 'EnCurso'
+  ? (['EnCurso', 'Aprobado', 'RecuperaPrimerCuatrimestre', 'RecuperaSegundoCuatrimestre', 'RecuperaAmbos', 'AprobadoPorEquivalencia'] as const)[estado] || 'EnCurso'
   : estado || 'EnCurso';
 
 export const isLegacy = (v: GradeValues) => v.c1 === '' && v.c2 === '' && v.diciembre === '' && v.febrero === '';
@@ -37,6 +39,10 @@ export const exceptionalQuarter = (v: GradeValues): 1 | 2 | null => {
 export const suggestedRecovery = (v: GradeValues): RecuperacionExcepcional => exceptionalQuarter(v) === 2 ? 'RecuperaSegundoCuatrimestre' : 'RecuperaPrimerCuatrimestre';
 
 export function calculateGrades(v: GradeValues) {
+  if (v.estado === 'AprobadoPorEquivalencia') {
+    return { ...v, estado: 'AprobadoPorEquivalencia' as const, anual: '' as Grado, final: '' as Grado, desdePase: false, needsChoice: false };
+  }
+  v = { ...v, desdePase: !!v.desdePase, disposicionEquivalencia: null };
   const c1 = toNumber(v.c1), c2 = toNumber(v.c2);
   const quarter = exceptionalQuarter(v);
   const choice = quarter ? v.recuperacionExcepcional ?? null : null;
@@ -63,6 +69,14 @@ export function calculateGrades(v: GradeValues) {
     }
   }
   return { ...v, anual, final, estado, recuperacionExcepcional: choice, needsChoice: quarter !== null && choice === null };
+}
+
+export type GradeOrigin = 'Normal' | 'Equivalencia' | 'Pase';
+
+export function changeGradeOrigin<T extends GradeValues>(base: T, origin: GradeOrigin, disposition = '') {
+  if (!['Normal', 'Equivalencia', 'Pase'].includes(origin)) throw new Error('Origen de calificación inválido.');
+  const estado = origin === 'Equivalencia' ? 'AprobadoPorEquivalencia' : base.estado === 'AprobadoPorEquivalencia' ? 'EnCurso' : base.estado;
+  return { ...base, ...calculateGrades({ ...base, estado, desdePase: origin === 'Pase', disposicionEquivalencia: origin === 'Equivalencia' ? disposition.trim() : null }) };
 }
 
 export function editGrade<T extends GradeValues>(base: T, field: GradeField, grade: Grado) {
@@ -94,14 +108,19 @@ export function gradesFromCalificacion(source?: GradeSource | null) {
     anual: toGrade(source?.promedioAnual), final: toGrade(source?.calificacionFinal),
     recuperacionExcepcional: source?.recuperacionExcepcional,
     estado: normalizeEstado(source?.estado),
+    disposicionEquivalencia: source?.disposicionEquivalencia,
+    desdePase: source?.desdePase,
   });
 }
 
 export function buildSaveRequest(cursadaMateriaId: number, values: GradeValues, source?: CalificacionMetadata | null): SaveCalificacionRequest {
   const v = calculateGrades(values);
+  if (v.estado === 'AprobadoPorEquivalencia' && !v.disposicionEquivalencia?.trim()) throw new Error('La disposición de equivalencia es obligatoria.');
   if (v.needsChoice) throw new Error('Confirmá qué cuatrimestre(s) recuperar antes de guardar.');
   return {
     cursadaMateriaId,
+    desdePase: !!v.desdePase,
+    disposicionEquivalencia: v.estado === 'AprobadoPorEquivalencia' ? v.disposicionEquivalencia!.trim() : null,
     c1Nota1: source?.c1Nota1, c1Nota2: source?.c1Nota2, c1Nota3: source?.c1Nota3,
     c2Nota1: source?.c2Nota1, c2Nota2: source?.c2Nota2, c2Nota3: source?.c2Nota3,
     c1Promedio: toNumber(v.c1), c1Condicion: conditionFromGrade(v.c1),

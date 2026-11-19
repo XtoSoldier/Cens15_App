@@ -12,6 +12,7 @@ const DocentesScreen: React.FC = () => {
   const navigation = useNavigation<DocentesMenuNavigationProp>();
   const { userRole } = useAppSelector((state) => state.app);
   const normalizedRole = (userRole || '').toLowerCase();
+  const isSuperAdmin = normalizedRole.trim() === 'superadmin';
   const canCalificar = normalizedRole.includes('docente') || normalizedRole.includes('admin');
 
   const options = [
@@ -23,7 +24,7 @@ const DocentesScreen: React.FC = () => {
     },
     {
       title: 'Calificar',
-      subtitle: 'Cargar notas por materia y curso',
+      subtitle: isSuperAdmin ? 'Calificar por materia y curso de todo el establecimiento' : 'Cargar notas por materia y curso',
       icon: 'pencil',
       route: 'DocenteCalificar' as const,
       hidden: !canCalificar,

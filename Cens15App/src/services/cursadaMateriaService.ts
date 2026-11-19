@@ -17,3 +17,7 @@ export const createCursadaMateria = async (data: { inscripcionId: number; materi
     body: JSON.stringify(data),
   });
 };
+
+export const prepareCursadaParaCalificar = async (data: { inscripcionId: number; materiaId: number }): Promise<CursadaMateria> => {
+  return await apiFetch('CursadasMaterias/para-calificar', { method: 'POST', body: JSON.stringify(data) });
+};
